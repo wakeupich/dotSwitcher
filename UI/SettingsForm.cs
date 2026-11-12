@@ -101,7 +101,46 @@ namespace dotSwitcher.UI
             checkBoxTrayIcon.Checked = settings.ShowTrayIcon == true;
             checkBoxSmartSelection.Checked = settings.SmartSelection == true;
             DisplaySwitchDelay(settings.SwitchDelay);
+            PopulateLayoutsUi();
             icon.SetRunning(engine.IsStarted());
+        }
+
+        private bool isUpdatingLayoutsUi = false;
+
+        void PopulateLayoutsUi()
+        {
+            isUpdatingLayoutsUi = true;
+            try
+            {
+                bool filterActive = settings.FilterLayouts == true;
+                radioSelectedLayouts.Checked = filterActive;
+                radioAllLayouts.Checked = !filterActive;
+                checkedListBoxLayouts.Enabled = true;
+
+                var enabledSet = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                if (!string.IsNullOrWhiteSpace(settings.EnabledLayouts))
+                {
+                    var parts = settings.EnabledLayouts.Split(new char[] { ',', ';', ' ' }, StringSplitOptions.RemoveEmptyEntries);
+                    foreach (var p in parts)
+                    {
+                        enabledSet.Add(p.Trim());
+                    }
+                }
+
+                var items = LowLevelAdapter.GetInstalledLayoutItems();
+                checkedListBoxLayouts.BeginUpdate();
+                checkedListBoxLayouts.Items.Clear();
+                foreach (var item in items)
+                {
+                    bool isChecked = !filterActive || enabledSet.Count == 0 || enabledSet.Contains(item.Id);
+                    checkedListBoxLayouts.Items.Add(item, isChecked);
+                }
+                checkedListBoxLayouts.EndUpdate();
+            }
+            finally
+            {
+                isUpdatingLayoutsUi = false;
+            }
         }
 
         // also ESC
@@ -119,6 +158,40 @@ namespace dotSwitcher.UI
                 MessageBox.Show("Sorry, win+ and alt+ hotkeys are not supported yet for Convert last word");
                 return;
             }
+
+            var selectedIds = new List<string>();
+            foreach (var obj in checkedListBoxLayouts.CheckedItems)
+            {
+                var item = obj as LayoutItem;
+                if (item != null)
+                {
+                    selectedIds.Add(item.Id);
+                }
+            }
+
+            int totalItems = checkedListBoxLayouts.Items.Count;
+            bool useSelectedOnly = radioSelectedLayouts.Checked || (totalItems > 0 && selectedIds.Count < totalItems);
+
+            if (useSelectedOnly)
+            {
+                if (selectedIds.Count == 0)
+                {
+                    MessageBox.Show(
+                        "Please select at least one keyboard layout or choose 'All installed layouts'.",
+                        "dotSwitcher",
+                        MessageBoxButtons.OK,
+                        MessageBoxIcon.Warning);
+                    return;
+                }
+                settings.FilterLayouts = true;
+                settings.EnabledLayouts = string.Join(",", selectedIds.ToArray());
+            }
+            else
+            {
+                settings.FilterLayouts = false;
+                settings.EnabledLayouts = "";
+            }
+
             SaveSettings();
             HideForm();
         }
@@ -443,6 +516,18 @@ namespace dotSwitcher.UI
             toolTip1.Hide(label5);
         }
 
+        private void labelSmartSelectionHelp_MouseHover(object sender, EventArgs e)
+        {
+            toolTip1.Show(
+                "When enabled, 'Convert last word' (Pause) converts the entire typed phrase (multiple words separated by spaces).\nWhen disabled, space resets tracking so only the single last word is converted.",
+                checkBoxSmartSelection);
+        }
+
+        private void labelSmartSelectionHelp_MouseLeave(object sender, EventArgs e)
+        {
+            toolTip1.Hide(checkBoxSmartSelection);
+        }
+
         private void toolTip1_Popup(object sender, PopupEventArgs e)
         {
         }
@@ -450,6 +535,71 @@ namespace dotSwitcher.UI
         private void smartSelection_CheckedChanged(object sender, EventArgs e)
         {
             settings.SmartSelection = checkBoxSmartSelection.Checked;
+        }
+
+        private void radioLayouts_CheckedChanged(object sender, EventArgs e)
+        {
+            if (isUpdatingLayoutsUi) return;
+            if (radioAllLayouts.Checked)
+            {
+                isUpdatingLayoutsUi = true;
+                try
+                {
+                    for (int i = 0; i < checkedListBoxLayouts.Items.Count; i++)
+                    {
+                        checkedListBoxLayouts.SetItemChecked(i, true);
+                    }
+                }
+                finally
+                {
+                    isUpdatingLayoutsUi = false;
+                }
+                settings.FilterLayouts = false;
+                settings.EnabledLayouts = "";
+            }
+        }
+
+        private void checkedListBoxLayouts_ItemCheck(object sender, ItemCheckEventArgs e)
+        {
+            if (isUpdatingLayoutsUi) return;
+            var selectedIds = new List<string>();
+            for (int i = 0; i < checkedListBoxLayouts.Items.Count; i++)
+            {
+                bool isChecked = (i == e.Index)
+                    ? (e.NewValue == CheckState.Checked)
+                    : checkedListBoxLayouts.GetItemChecked(i);
+                if (isChecked)
+                {
+                    var item = checkedListBoxLayouts.Items[i] as LayoutItem;
+                    if (item != null)
+                    {
+                        selectedIds.Add(item.Id);
+                    }
+                }
+            }
+
+            isUpdatingLayoutsUi = true;
+            try
+            {
+                if (selectedIds.Count < checkedListBoxLayouts.Items.Count)
+                {
+                    radioSelectedLayouts.Checked = true;
+                    radioAllLayouts.Checked = false;
+                    settings.FilterLayouts = true;
+                    settings.EnabledLayouts = string.Join(",", selectedIds.ToArray());
+                }
+                else
+                {
+                    radioAllLayouts.Checked = true;
+                    radioSelectedLayouts.Checked = false;
+                    settings.FilterLayouts = false;
+                    settings.EnabledLayouts = "";
+                }
+            }
+            finally
+            {
+                isUpdatingLayoutsUi = false;
+            }
         }
     }
 }

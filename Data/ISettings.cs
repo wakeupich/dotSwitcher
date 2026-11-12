@@ -26,5 +26,7 @@ namespace dotSwitcher.Data
         int SwitchDelay { get; set; }
         bool? SmartSelection { get; set; }
         bool? RunAsAdmin { get; set; }
+        bool? FilterLayouts { get; set; }
+        string EnabledLayouts { get; set; }
     }
 }

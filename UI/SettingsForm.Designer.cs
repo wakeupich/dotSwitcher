@@ -49,13 +49,19 @@
             this.toolTip1 = new System.Windows.Forms.ToolTip(this.components);
             this.textBoxConvertHotkey = new System.Windows.Forms.TextBox();
             this.textBoxSwitchHotkey = new System.Windows.Forms.TextBox();
+            this.groupBoxLayouts = new System.Windows.Forms.GroupBox();
+            this.radioAllLayouts = new System.Windows.Forms.RadioButton();
+            this.radioSelectedLayouts = new System.Windows.Forms.RadioButton();
+            this.checkedListBoxLayouts = new System.Windows.Forms.CheckedListBox();
+            this.labelSmartSelectionHelp = new System.Windows.Forms.Label();
             this.groupBox1.SuspendLayout();
+            this.groupBoxLayouts.SuspendLayout();
             this.SuspendLayout();
             // 
             // buttonCancelSettings
             // 
             this.buttonCancelSettings.DialogResult = System.Windows.Forms.DialogResult.Cancel;
-            this.buttonCancelSettings.Location = new System.Drawing.Point(323, 200);
+            this.buttonCancelSettings.Location = new System.Drawing.Point(323, 324);
             this.buttonCancelSettings.Name = "buttonCancelSettings";
             this.buttonCancelSettings.Size = new System.Drawing.Size(75, 25);
             this.buttonCancelSettings.TabIndex = 17;
@@ -65,7 +71,7 @@
             // 
             // buttonSaveSettings
             // 
-            this.buttonSaveSettings.Location = new System.Drawing.Point(242, 200);
+            this.buttonSaveSettings.Location = new System.Drawing.Point(242, 324);
             this.buttonSaveSettings.Name = "buttonSaveSettings";
             this.buttonSaveSettings.Size = new System.Drawing.Size(75, 25);
             this.buttonSaveSettings.TabIndex = 15;
@@ -75,7 +81,7 @@
             // 
             // buttonExit
             // 
-            this.buttonExit.Location = new System.Drawing.Point(12, 200);
+            this.buttonExit.Location = new System.Drawing.Point(12, 324);
             this.buttonExit.Name = "buttonExit";
             this.buttonExit.Size = new System.Drawing.Size(85, 25);
             this.buttonExit.TabIndex = 18;
@@ -129,6 +135,18 @@
             this.checkBoxSmartSelection.UseVisualStyleBackColor = true;
             this.checkBoxSmartSelection.CheckedChanged += new System.EventHandler(this.smartSelection_CheckedChanged);
             // 
+            // labelSmartSelectionHelp
+            // 
+            this.labelSmartSelectionHelp.AutoSize = true;
+            this.labelSmartSelectionHelp.Cursor = System.Windows.Forms.Cursors.Help;
+            this.labelSmartSelectionHelp.Location = new System.Drawing.Point(175, 88);
+            this.labelSmartSelectionHelp.Name = "labelSmartSelectionHelp";
+            this.labelSmartSelectionHelp.Size = new System.Drawing.Size(13, 13);
+            this.labelSmartSelectionHelp.TabIndex = 33;
+            this.labelSmartSelectionHelp.Text = "?";
+            this.labelSmartSelectionHelp.MouseLeave += new System.EventHandler(this.labelSmartSelectionHelp_MouseLeave);
+            this.labelSmartSelectionHelp.MouseHover += new System.EventHandler(this.labelSmartSelectionHelp_MouseHover);
+            // 
             // label3
             // 
             this.label3.AutoSize = true;
@@ -152,9 +170,9 @@
             this.buttonGithub.FlatStyle = System.Windows.Forms.FlatStyle.Flat;
             this.buttonGithub.Image = global::dotSwitcher.Properties.Resources.github;
             this.buttonGithub.ImageAlign = System.Drawing.ContentAlignment.MiddleLeft;
-            this.buttonGithub.Location = new System.Drawing.Point(12, 160);
+            this.buttonGithub.Location = new System.Drawing.Point(105, 324);
             this.buttonGithub.Name = "buttonGithub";
-            this.buttonGithub.Size = new System.Drawing.Size(114, 26);
+            this.buttonGithub.Size = new System.Drawing.Size(114, 25);
             this.buttonGithub.TabIndex = 28;
             this.buttonGithub.Text = "Report an issue";
             this.buttonGithub.TextAlign = System.Drawing.ContentAlignment.MiddleRight;
@@ -242,6 +260,53 @@
             this.groupBox1.TabStop = false;
             this.groupBox1.Text = "Hotkeys";
             // 
+            // groupBoxLayouts
+            // 
+            this.groupBoxLayouts.Controls.Add(this.radioAllLayouts);
+            this.groupBoxLayouts.Controls.Add(this.radioSelectedLayouts);
+            this.groupBoxLayouts.Controls.Add(this.checkedListBoxLayouts);
+            this.groupBoxLayouts.Location = new System.Drawing.Point(12, 172);
+            this.groupBoxLayouts.Name = "groupBoxLayouts";
+            this.groupBoxLayouts.Size = new System.Drawing.Size(386, 140);
+            this.groupBoxLayouts.TabIndex = 32;
+            this.groupBoxLayouts.TabStop = false;
+            this.groupBoxLayouts.Text = "Keyboard layouts in cycle";
+            // 
+            // radioAllLayouts
+            // 
+            this.radioAllLayouts.AutoSize = true;
+            this.radioAllLayouts.Checked = true;
+            this.radioAllLayouts.Location = new System.Drawing.Point(10, 19);
+            this.radioAllLayouts.Name = "radioAllLayouts";
+            this.radioAllLayouts.Size = new System.Drawing.Size(124, 17);
+            this.radioAllLayouts.TabIndex = 0;
+            this.radioAllLayouts.TabStop = true;
+            this.radioAllLayouts.Text = "All installed layouts";
+            this.radioAllLayouts.UseVisualStyleBackColor = true;
+            this.radioAllLayouts.CheckedChanged += new System.EventHandler(this.radioLayouts_CheckedChanged);
+            // 
+            // radioSelectedLayouts
+            // 
+            this.radioSelectedLayouts.AutoSize = true;
+            this.radioSelectedLayouts.Location = new System.Drawing.Point(160, 19);
+            this.radioSelectedLayouts.Name = "radioSelectedLayouts";
+            this.radioSelectedLayouts.Size = new System.Drawing.Size(130, 17);
+            this.radioSelectedLayouts.TabIndex = 1;
+            this.radioSelectedLayouts.Text = "Only selected layouts:";
+            this.radioSelectedLayouts.UseVisualStyleBackColor = true;
+            this.radioSelectedLayouts.CheckedChanged += new System.EventHandler(this.radioLayouts_CheckedChanged);
+            // 
+            // checkedListBoxLayouts
+            // 
+            this.checkedListBoxLayouts.CheckOnClick = true;
+            this.checkedListBoxLayouts.FormattingEnabled = true;
+            this.checkedListBoxLayouts.IntegralHeight = false;
+            this.checkedListBoxLayouts.Location = new System.Drawing.Point(10, 42);
+            this.checkedListBoxLayouts.Name = "checkedListBoxLayouts";
+            this.checkedListBoxLayouts.Size = new System.Drawing.Size(366, 88);
+            this.checkedListBoxLayouts.TabIndex = 2;
+            this.checkedListBoxLayouts.ItemCheck += new System.Windows.Forms.ItemCheckEventHandler(this.checkedListBoxLayouts_ItemCheck);
+            // 
             // toolTip1
             // 
             this.toolTip1.AutoPopDelay = 5000;
@@ -255,7 +320,9 @@
             this.AutoScaleDimensions = new System.Drawing.SizeF(6F, 13F);
             this.AutoScaleMode = System.Windows.Forms.AutoScaleMode.Font;
             this.CancelButton = this.buttonCancelSettings;
-            this.ClientSize = new System.Drawing.Size(410, 238);
+            this.ClientSize = new System.Drawing.Size(410, 362);
+            this.Controls.Add(this.labelSmartSelectionHelp);
+            this.Controls.Add(this.groupBoxLayouts);
             this.Controls.Add(this.checkBoxSmartSelection);
             this.Controls.Add(this.checkBoxRunAsAdmin);
             this.Controls.Add(this.groupBox1);
@@ -276,6 +343,8 @@
             this.Shown += new System.EventHandler(this.SettingsForm_Shown);
             this.groupBox1.ResumeLayout(false);
             this.groupBox1.PerformLayout();
+            this.groupBoxLayouts.ResumeLayout(false);
+            this.groupBoxLayouts.PerformLayout();
             this.ResumeLayout(false);
             this.PerformLayout();
 
@@ -302,5 +371,10 @@
         private System.Windows.Forms.TextBox textBoxSwitchHotkey;
         private System.Windows.Forms.TextBox textBoxConvertHotkey;
         private System.Windows.Forms.CheckBox checkBoxSmartSelection;
+        private System.Windows.Forms.GroupBox groupBoxLayouts;
+        private System.Windows.Forms.RadioButton radioAllLayouts;
+        private System.Windows.Forms.RadioButton radioSelectedLayouts;
+        private System.Windows.Forms.CheckedListBox checkedListBoxLayouts;
+        private System.Windows.Forms.Label labelSmartSelectionHelp;
     }
 }

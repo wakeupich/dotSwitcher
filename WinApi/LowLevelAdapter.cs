@@ -28,9 +28,23 @@ using System.Reflection;
 using System.Collections.Generic;
 using System.Security.Principal;
 using System.Security;
+using System.Globalization;
+using dotSwitcher.Data;
 
 namespace dotSwitcher.WinApi
 {
+    public class LayoutItem
+    {
+        public string Id { get; set; }
+        public IntPtr Handle { get; set; }
+        public string DisplayName { get; set; }
+
+        public override string ToString()
+        {
+            return DisplayName;
+        }
+    }
+
     public static partial class LowLevelAdapter
     {
         public const string TaskName = "dotSwitcher";
@@ -87,40 +101,81 @@ namespace dotSwitcher.WinApi
         public static IntPtr GetTargetWindowHandle()
         {
             IntPtr fgWnd = GetForegroundWindow();
-            IntPtr hWnd = IntPtr.Zero;
+            if (fgWnd == IntPtr.Zero)
+            {
+                return IntPtr.Zero;
+            }
             var threadId = GetWindowThreadProcessId(fgWnd, IntPtr.Zero);
             var info = new GUITHREADINFO();
             info.cbSize = Marshal.SizeOf(info);
-            var success = GetGUIThreadInfo(threadId, ref info);
-
-            var focusedHandle = GetFocusedHandle();
-            if (success)
+            if (GetGUIThreadInfo(threadId, ref info))
             {
                 if (info.hwndCaret != IntPtr.Zero)
-                    hWnd = info.hwndCaret;
-                else if (info.hwndFocus != IntPtr.Zero)
-                    hWnd = info.hwndFocus;
-                else if (focusedHandle != IntPtr.Zero)
-                    hWnd = focusedHandle;
-                else if (info.hwndActive != IntPtr.Zero)
-                    hWnd = info.hwndActive;
+                    return info.hwndCaret;
+                if (info.hwndFocus != IntPtr.Zero)
+                    return info.hwndFocus;
+                if (info.hwndActive != IntPtr.Zero)
+                    return info.hwndActive;
+            }
+
+            var focusedHandle = GetFocusedHandle();
+            if (focusedHandle != IntPtr.Zero)
+            {
+                return focusedHandle;
+            }
+            return fgWnd;
+        }
+
+        private static IntPtr lastSwitchedFgWindow = IntPtr.Zero;
+        private static IntPtr lastObservedOsHkl = IntPtr.Zero;
+        private static IntPtr lastTargetHkl = IntPtr.Zero;
+
+        private static IntPtr GetRawOsLayout(out IntPtr fgWnd, out IntPtr fgHkl)
+        {
+            fgWnd = GetForegroundWindow();
+            var hWnd = GetTargetWindowHandle();
+            var wndThreadId = GetWindowThreadProcessId(hWnd != IntPtr.Zero ? hWnd : fgWnd, IntPtr.Zero);
+            var osHkl = GetKeyboardLayout(wndThreadId);
+            if (fgWnd != IntPtr.Zero && fgWnd != hWnd)
+            {
+                var fgThreadId = GetWindowThreadProcessId(fgWnd, IntPtr.Zero);
+                fgHkl = GetKeyboardLayout(fgThreadId);
             }
             else
             {
-                hWnd = focusedHandle;
+                fgHkl = osHkl;
             }
-            if (hWnd == IntPtr.Zero)
-            {
-                hWnd = fgWnd;
-            }
-            return hWnd;
+            return osHkl;
         }
 
         public static IntPtr GetCurrentLayout()
         {
-            var hWnd = GetTargetWindowHandle();
-            var wndThreadId = GetWindowThreadProcessId(hWnd != IntPtr.Zero ? hWnd : GetForegroundWindow(), IntPtr.Zero);
-            return GetKeyboardLayout(wndThreadId);
+            IntPtr fgWnd;
+            IntPtr fgHkl;
+            var osHkl = GetRawOsLayout(out fgWnd, out fgHkl);
+
+            if (fgWnd != IntPtr.Zero && fgWnd == lastSwitchedFgWindow && lastTargetHkl != IntPtr.Zero)
+            {
+                string targetId = GetLayoutId(lastTargetHkl);
+                string osId = GetLayoutId(osHkl);
+                string fgId = GetLayoutId(fgHkl);
+                string prevOsId = GetLayoutId(lastObservedOsHkl);
+
+                if (string.Equals(osId, targetId, StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(fgId, targetId, StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(osId, prevOsId, StringComparison.OrdinalIgnoreCase))
+                {
+                    return lastTargetHkl;
+                }
+            }
+
+            return osHkl;
+        }
+
+        public static string GetLayoutId(IntPtr hkl)
+        {
+            uint id = (uint)(hkl.ToInt64() & 0xFFFFFFFFL);
+            return id.ToString("X8");
         }
 
         public static IntPtr[] GetInstalledLayouts()
@@ -135,36 +190,181 @@ namespace dotSwitcher.WinApi
             return layouts;
         }
 
-        public static IntPtr GetNextLayout(IntPtr currentLayout)
+        public static List<LayoutItem> GetInstalledLayoutItems()
         {
+            var result = new List<LayoutItem>();
             var layouts = GetInstalledLayouts();
-            if (layouts.Length == 0)
+            foreach (var hkl in layouts)
+            {
+                string id = GetLayoutId(hkl);
+                string display = id;
+                try
+                {
+                    InputLanguage lang = null;
+                    foreach (InputLanguage l in InputLanguage.InstalledInputLanguages)
+                    {
+                        if (string.Equals(GetLayoutId(l.Handle), id, StringComparison.OrdinalIgnoreCase))
+                        {
+                            lang = l;
+                            break;
+                        }
+                    }
+                    if (lang != null && lang.Culture != null)
+                    {
+                        string iso = lang.Culture.TwoLetterISOLanguageName.ToUpperInvariant();
+                        string cultureName = lang.Culture.DisplayName;
+                        string layoutName = lang.LayoutName;
+                        if (!string.IsNullOrEmpty(layoutName) &&
+                            !string.Equals(cultureName, layoutName, StringComparison.OrdinalIgnoreCase))
+                        {
+                            display = string.Format("[{0}] {1} - {2}", iso, cultureName, layoutName);
+                        }
+                        else
+                        {
+                            display = string.Format("[{0}] {1}", iso, cultureName);
+                        }
+                    }
+                    else
+                    {
+                        int langId = (int)(hkl.ToInt64() & 0xFFFF);
+                        var ci = new CultureInfo(langId);
+                        display = string.Format("[{0}] {1} (0x{2})", ci.TwoLetterISOLanguageName.ToUpperInvariant(), ci.DisplayName, id);
+                    }
+                }
+                catch
+                {
+                    display = "0x" + id;
+                }
+
+                result.Add(new LayoutItem
+                {
+                    Id = id,
+                    Handle = hkl,
+                    DisplayName = display
+                });
+            }
+            return result;
+        }
+
+        private static int FindLayoutIndex(IList<IntPtr> layouts, IntPtr target)
+        {
+            if (layouts == null || layouts.Count == 0) return -1;
+            string targetId = GetLayoutId(target);
+            for (int i = 0; i < layouts.Count; i++)
+            {
+                if (string.Equals(GetLayoutId(layouts[i]), targetId, StringComparison.OrdinalIgnoreCase))
+                {
+                    return i;
+                }
+            }
+            for (int i = 0; i < layouts.Count; i++)
+            {
+                if (((long)layouts[i] & 0xFFFF) == ((long)target & 0xFFFF))
+                {
+                    return i;
+                }
+            }
+            return -1;
+        }
+
+        public static IntPtr[] GetAllowedLayouts(ISettings settings)
+        {
+            var allLayouts = GetInstalledLayouts();
+            if (allLayouts.Length == 0 || settings == null || settings.FilterLayouts != true || string.IsNullOrWhiteSpace(settings.EnabledLayouts))
+            {
+                return allLayouts;
+            }
+
+            var enabledIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            var parts = settings.EnabledLayouts.Split(new char[] { ',', ';', ' ' }, StringSplitOptions.RemoveEmptyEntries);
+            foreach (var p in parts)
+            {
+                enabledIds.Add(p.Trim());
+            }
+
+            if (enabledIds.Count == 0)
+            {
+                return allLayouts;
+            }
+
+            var filtered = new List<IntPtr>(allLayouts.Length);
+            foreach (var hkl in allLayouts)
+            {
+                if (enabledIds.Contains(GetLayoutId(hkl)))
+                {
+                    filtered.Add(hkl);
+                }
+            }
+
+            return filtered.Count > 0 ? filtered.ToArray() : allLayouts;
+        }
+
+        public static IntPtr GetNextLayout(IntPtr currentLayout, ISettings settings = null)
+        {
+            var allowed = GetAllowedLayouts(settings);
+            if (allowed.Length == 0)
             {
                 return (IntPtr)HKL_NEXT;
             }
-            int idx = Array.IndexOf(layouts, currentLayout);
-            if (idx < 0)
+            int idx = FindLayoutIndex(allowed, currentLayout);
+            if (idx >= 0)
             {
-                for (int i = 0; i < layouts.Length; i++)
+                return allowed[(idx + 1) % allowed.Length];
+            }
+
+            // Current layout is excluded from cycle: find the next allowed layout following currentLayout in OS order
+            var all = GetInstalledLayouts();
+            int allIdx = FindLayoutIndex(all, currentLayout);
+            if (allIdx >= 0)
+            {
+                for (int step = 1; step <= all.Length; step++)
                 {
-                    if (((long)layouts[i] & 0xFFFF) == ((long)currentLayout & 0xFFFF))
+                    var candidate = all[(allIdx + step) % all.Length];
+                    int allowedIdx = FindLayoutIndex(allowed, candidate);
+                    if (allowedIdx >= 0)
                     {
-                        idx = i;
-                        break;
+                        return allowed[allowedIdx];
                     }
                 }
             }
-            int nextIdx = (idx + 1) % layouts.Length;
-            return layouts[nextIdx];
+
+            return allowed[0];
+        }
+
+        private static void TrySetTsfLanguage(ushort langId)
+        {
+            if (langId == 0) return;
+            try
+            {
+                ITfInputProcessorProfiles profiles;
+                if (TF_CreateInputProcessorProfiles(out profiles) == 0 && profiles != null)
+                {
+                    try
+                    {
+                        profiles.ChangeCurrentLanguage(langId);
+                    }
+                    finally
+                    {
+                        Marshal.ReleaseComObject(profiles);
+                    }
+                }
+            }
+            catch { }
         }
 
         public static void SetKeyboardLayout(IntPtr targetHkl)
         {
-            IntPtr fgWnd = GetForegroundWindow();
+            IntPtr fgWnd;
+            IntPtr fgHkl;
+            var rawOsHkl = GetRawOsLayout(out fgWnd, out fgHkl);
             IntPtr hWnd = GetTargetWindowHandle();
 
             if (targetHkl != IntPtr.Zero && targetHkl != (IntPtr)HKL_NEXT)
             {
+                lastSwitchedFgWindow = fgWnd;
+                lastObservedOsHkl = rawOsHkl;
+                lastTargetHkl = targetHkl;
+
                 if (hWnd != IntPtr.Zero && hWnd != fgWnd)
                 {
                     PostMessage(hWnd, WM_INPUTLANGCHANGEREQUEST, IntPtr.Zero, targetHkl);
@@ -173,6 +373,9 @@ namespace dotSwitcher.WinApi
                 {
                     PostMessage(fgWnd, WM_INPUTLANGCHANGEREQUEST, IntPtr.Zero, targetHkl);
                 }
+
+                ushort langId = (ushort)(targetHkl.ToInt64() & 0xFFFF);
+                TrySetTsfLanguage(langId);
             }
             else
             {
@@ -183,43 +386,37 @@ namespace dotSwitcher.WinApi
             }
         }
 
-        public static void SetNextKeyboardLayout()
+        public static void SetNextKeyboardLayout(ISettings settings = null)
         {
             var current = GetCurrentLayout();
-            var next = GetNextLayout(current);
+            var next = GetNextLayout(current, settings);
             SetKeyboardLayout(next);
         }
 
-        public static IntPtr GetNextLayoutForConversion(IList<Keys> vkCodes)
+        public static IntPtr GetNextLayoutForConversion(IList<Keys> vkCodes, ISettings settings = null)
         {
             var currentHkl = GetCurrentLayout();
-            var layouts = GetInstalledLayouts();
-            if (layouts.Length < 2 || vkCodes == null || vkCodes.Count == 0)
+            var allowed = GetAllowedLayouts(settings);
+            if (allowed.Length == 0 || vkCodes == null || vkCodes.Count == 0)
             {
-                return GetNextLayout(currentHkl);
+                return GetNextLayout(currentHkl, settings);
             }
 
-            int currentIdx = Array.IndexOf(layouts, currentHkl);
-            if (currentIdx < 0)
-            {
-                for (int i = 0; i < layouts.Length; i++)
-                {
-                    if (((long)layouts[i] & 0xFFFF) == ((long)currentHkl & 0xFFFF))
-                    {
-                        currentIdx = i;
-                        break;
-                    }
-                }
-            }
-            if (currentIdx < 0) currentIdx = 0;
-
+            int startIdx = FindLayoutIndex(allowed, currentHkl);
             var keyState = new byte[256];
             var buf1 = new StringBuilder(8);
             var buf2 = new StringBuilder(8);
 
-            for (int step = 1; step < layouts.Length; step++)
+            int count = allowed.Length;
+            for (int step = 1; step <= count; step++)
             {
-                IntPtr candidate = layouts[(currentIdx + step) % layouts.Length];
+                int candidateIdx = startIdx >= 0 ? (startIdx + step) % count : (step - 1) % count;
+                IntPtr candidate = allowed[candidateIdx];
+                if (string.Equals(GetLayoutId(candidate), GetLayoutId(currentHkl), StringComparison.OrdinalIgnoreCase))
+                {
+                    continue;
+                }
+
                 bool differs = false;
                 foreach (var k in vkCodes)
                 {
@@ -241,16 +438,17 @@ namespace dotSwitcher.WinApi
                 }
             }
 
-            return GetNextLayout(currentHkl);
+            return GetNextLayout(currentHkl, settings);
         }
 
-        public static string ConvertTextBetweenLayouts(string text, out IntPtr targetHkl)
+        public static string ConvertTextBetweenLayouts(string text, out IntPtr targetHkl, ISettings settings = null)
         {
             var currentHkl = GetCurrentLayout();
-            var layouts = GetInstalledLayouts();
-            targetHkl = GetNextLayout(currentHkl);
+            var allLayouts = GetInstalledLayouts();
+            var allowedLayouts = GetAllowedLayouts(settings);
+            targetHkl = GetNextLayout(currentHkl, settings);
 
-            if (string.IsNullOrEmpty(text) || layouts.Length < 2)
+            if (string.IsNullOrEmpty(text) || allLayouts.Length < 2)
             {
                 return text;
             }
@@ -259,7 +457,7 @@ namespace dotSwitcher.WinApi
             IntPtr sourceHkl = currentHkl;
             int bestScore = -1;
 
-            foreach (var hkl in layouts)
+            foreach (var hkl in allLayouts)
             {
                 int score = 0;
                 for (int i = 0; i < text.Length; i++)
@@ -275,24 +473,33 @@ namespace dotSwitcher.WinApi
                             score += char.IsLetter(c) ? 3 : 1;
                     }
                 }
-                if (score > bestScore || (score == bestScore && hkl == currentHkl))
+                bool isCurrent = string.Equals(GetLayoutId(hkl), GetLayoutId(currentHkl), StringComparison.OrdinalIgnoreCase);
+                bool isAllowed = FindLayoutIndex(allowedLayouts, hkl) >= 0;
+                if (score > bestScore ||
+                    (score == bestScore && (isCurrent || (isAllowed && FindLayoutIndex(allowedLayouts, sourceHkl) < 0))))
                 {
                     bestScore = score;
                     sourceHkl = hkl;
                 }
             }
 
-            // Find the source layout index
-            int sourceIdx = Array.IndexOf(layouts, sourceHkl);
-            if (sourceIdx < 0) sourceIdx = 0;
-
+            int startIdx = FindLayoutIndex(allowedLayouts, sourceHkl);
             string bestResult = text;
-            for (int step = 1; step < layouts.Length; step++)
+            bool firstSet = false;
+
+            for (int step = 1; step <= allowedLayouts.Length; step++)
             {
-                IntPtr candidateTarget = layouts[(sourceIdx + step) % layouts.Length];
-                string candidateText = MapStringBetweenLayouts(text, sourceHkl, candidateTarget, layouts);
-                if (step == 1)
+                int idx = startIdx >= 0 ? (startIdx + step) % allowedLayouts.Length : (step - 1) % allowedLayouts.Length;
+                IntPtr candidateTarget = allowedLayouts[idx];
+                if (string.Equals(GetLayoutId(candidateTarget), GetLayoutId(sourceHkl), StringComparison.OrdinalIgnoreCase))
                 {
+                    continue;
+                }
+
+                string candidateText = MapStringBetweenLayouts(text, sourceHkl, candidateTarget, allLayouts);
+                if (!firstSet)
+                {
+                    firstSet = true;
                     targetHkl = candidateTarget;
                     bestResult = candidateText;
                 }
@@ -401,19 +608,52 @@ namespace dotSwitcher.WinApi
             }
         }
 
-        public static void ReleasePressedFnKeys()
+        public static void SendBackspaces(int count)
         {
-            ReleasePressedKey(Keys.RControlKey, false);
-            ReleasePressedKey(Keys.LControlKey, false);
-            ReleasePressedKey(Keys.ControlKey, false);
-            ReleasePressedKey(Keys.LShiftKey, false);
-            ReleasePressedKey(Keys.RShiftKey, false);
-            ReleasePressedKey(Keys.ShiftKey, false);
-            ReleasePressedKey(Keys.LMenu, false);
-            ReleasePressedKey(Keys.RMenu, false);
-            ReleasePressedKey(Keys.Menu, false);
-            ReleasePressedKey(Keys.LWin, false);
-            ReleasePressedKey(Keys.RWin, false);
+            if (count <= 0) return;
+            var inputs = new INPUT[count * 2];
+            var down = MakeKeyInput(Keys.Back, true);
+            var up = MakeKeyInput(Keys.Back, false);
+            for (int i = 0; i < count; i++)
+            {
+                inputs[i * 2] = down;
+                inputs[i * 2 + 1] = up;
+            }
+            SendInput((uint)inputs.Length, inputs, Marshal.SizeOf(typeof(INPUT)));
+        }
+
+        private static readonly Keys[] ModifierKeysToRelease = new Keys[]
+        {
+            Keys.RControlKey,
+            Keys.LControlKey,
+            Keys.ControlKey,
+            Keys.LShiftKey,
+            Keys.RShiftKey,
+            Keys.ShiftKey,
+            Keys.LMenu,
+            Keys.RMenu,
+            Keys.Menu,
+            Keys.LWin,
+            Keys.RWin
+        };
+
+        public static bool ReleasePressedFnKeys()
+        {
+            var inputs = new List<INPUT>(6);
+            for (int i = 0; i < ModifierKeysToRelease.Length; i++)
+            {
+                var k = ModifierKeysToRelease[i];
+                if (KeyPressed(k))
+                {
+                    inputs.Add(MakeKeyInput(k, false));
+                }
+            }
+            if (inputs.Count == 0)
+            {
+                return false;
+            }
+            SendInput((uint)inputs.Count, inputs.ToArray(), Marshal.SizeOf(typeof(INPUT)));
+            return true;
         }
 
         public static bool ReleasePressedKey(Keys keyCode, bool releaseTwice)
@@ -472,7 +712,7 @@ namespace dotSwitcher.WinApi
         {
             try
             {
-                var psi = new ProcessStartInfo("schtasks.exe", $"/Query /TN \"{TaskName}\"")
+                var psi = new ProcessStartInfo("schtasks.exe", string.Format("/Query /TN \"{0}\"", TaskName))
                 {
                     CreateNoWindow = true,
                     UseShellExecute = false,
@@ -521,7 +761,7 @@ namespace dotSwitcher.WinApi
             var workDir = System.IO.Path.GetDirectoryName(exePath);
             var userId = WindowsIdentity.GetCurrent().Name;
 
-            string xml = $@"<?xml version=""1.0"" encoding=""UTF-16""?>
+            string xml = string.Format(@"<?xml version=""1.0"" encoding=""UTF-16""?>
 <Task version=""1.2"" xmlns=""http://schemas.microsoft.com/windows/2004/02/mit/task"">
   <RegistrationInfo>
     <Description>dotSwitcher keyboard layout switcher (Elevated)</Description>
@@ -529,12 +769,12 @@ namespace dotSwitcher.WinApi
   <Triggers>
     <LogonTrigger>
       <Enabled>true</Enabled>
-      <UserId>{SecurityElement.Escape(userId)}</UserId>
+      <UserId>{0}</UserId>
     </LogonTrigger>
   </Triggers>
   <Principals>
     <Principal id=""Author"">
-      <UserId>{SecurityElement.Escape(userId)}</UserId>
+      <UserId>{0}</UserId>
       <LogonType>InteractiveToken</LogonType>
       <RunLevel>HighestAvailable</RunLevel>
     </Principal>
@@ -560,17 +800,20 @@ namespace dotSwitcher.WinApi
   </Settings>
   <Actions Context=""Author"">
     <Exec>
-      <Command>{SecurityElement.Escape(exePath)}</Command>
-      <WorkingDirectory>{SecurityElement.Escape(workDir)}</WorkingDirectory>
+      <Command>{1}</Command>
+      <WorkingDirectory>{2}</WorkingDirectory>
     </Exec>
   </Actions>
-</Task>";
+</Task>",
+                SecurityElement.Escape(userId),
+                SecurityElement.Escape(exePath),
+                SecurityElement.Escape(workDir));
 
-            string tempXml = System.IO.Path.Combine(System.IO.Path.GetTempPath(), $"dotSwitcher_task_{Guid.NewGuid():N}.xml");
+            string tempXml = System.IO.Path.Combine(System.IO.Path.GetTempPath(), string.Format("dotSwitcher_task_{0:N}.xml", Guid.NewGuid()));
             try
             {
                 System.IO.File.WriteAllText(tempXml, xml, Encoding.Unicode);
-                var psi = new ProcessStartInfo("schtasks.exe", $"/Create /TN \"{TaskName}\" /XML \"{tempXml}\" /F")
+                var psi = new ProcessStartInfo("schtasks.exe", string.Format("/Create /TN \"{0}\" /XML \"{1}\" /F", TaskName, tempXml))
                 {
                     CreateNoWindow = true,
                     UseShellExecute = false,
@@ -601,7 +844,7 @@ namespace dotSwitcher.WinApi
             if (!IsAutorunTaskExists()) return;
             try
             {
-                var psi = new ProcessStartInfo("schtasks.exe", $"/Delete /TN \"{TaskName}\" /F")
+                var psi = new ProcessStartInfo("schtasks.exe", string.Format("/Delete /TN \"{0}\" /F", TaskName))
                 {
                     CreateNoWindow = true,
                     UseShellExecute = false,
@@ -691,10 +934,18 @@ namespace dotSwitcher.WinApi
 
         #endregion
 
-        #region Clipboard Backup / Restore
+        #region Fast Native Win32 Clipboard & Backup / Restore
 
         private static string backupText = null;
         private static bool hadText = false;
+        private static readonly uint FormatExcludeMonitor = RegisterClipboardFormat("ExcludeClipboardContentFromMonitorProcessing");
+        private static readonly uint FormatCanIncludeHistory = RegisterClipboardFormat("CanIncludeInClipboardHistory");
+        private static readonly uint FormatCanUploadCloud = RegisterClipboardFormat("CanUploadToCloudClipboard");
+
+        public static uint GetClipboardSeqNumber()
+        {
+            return GetClipboardSequenceNumber();
+        }
 
         public static Keys ToKey(char ch)
         {
@@ -707,31 +958,144 @@ namespace dotSwitcher.WinApi
             return (Keys)(((keyNumber & 0xFF00) << 8) | (keyNumber & 0xFF));
         }
 
-        public static void BackupClipboard()
+        public static bool TryGetClipboardText(out string text)
         {
-            hadText = false;
-            backupText = null;
+            text = null;
+            if (!IsClipboardFormatAvailable(CF_UNICODETEXT))
+            {
+                return false;
+            }
+
+            for (int attempt = 0; attempt < 15; attempt++)
+            {
+                if (OpenClipboard(IntPtr.Zero))
+                {
+                    try
+                    {
+                        IntPtr handle = GetClipboardData(CF_UNICODETEXT);
+                        if (handle == IntPtr.Zero)
+                        {
+                            return false;
+                        }
+                        IntPtr ptr = GlobalLock(handle);
+                        if (ptr == IntPtr.Zero)
+                        {
+                            return false;
+                        }
+                        try
+                        {
+                            text = Marshal.PtrToStringUni(ptr);
+                            return text != null;
+                        }
+                        finally
+                        {
+                            GlobalUnlock(handle);
+                        }
+                    }
+                    finally
+                    {
+                        CloseClipboard();
+                    }
+                }
+                Thread.Sleep(2);
+            }
+            return false;
+        }
+
+        private static void SetClipboardDword(uint format, int value)
+        {
+            if (format == 0) return;
+            IntPtr hMem = GlobalAlloc(GMEM_MOVEABLE, (UIntPtr)4);
+            if (hMem == IntPtr.Zero) return;
+            IntPtr ptr = GlobalLock(hMem);
+            if (ptr == IntPtr.Zero)
+            {
+                GlobalFree(hMem);
+                return;
+            }
             try
             {
-                if (Clipboard.ContainsText())
-                {
-                    hadText = true;
-                    backupText = Clipboard.GetText();
-                }
+                Marshal.WriteInt32(ptr, value);
             }
-            catch { }
+            finally
+            {
+                GlobalUnlock(hMem);
+            }
+            if (SetClipboardData(format, hMem) == IntPtr.Zero)
+            {
+                GlobalFree(hMem);
+            }
+        }
+
+        public static bool TrySetClipboardText(string text, bool excludeFromHistory)
+        {
+            if (text == null)
+            {
+                return false;
+            }
+
+            for (int attempt = 0; attempt < 15; attempt++)
+            {
+                if (OpenClipboard(IntPtr.Zero))
+                {
+                    try
+                    {
+                        EmptyClipboard();
+                        int bytes = (text.Length + 1) * 2;
+                        IntPtr hGlobal = GlobalAlloc(GMEM_MOVEABLE, (UIntPtr)bytes);
+                        if (hGlobal == IntPtr.Zero)
+                        {
+                            return false;
+                        }
+                        IntPtr ptr = GlobalLock(hGlobal);
+                        if (ptr == IntPtr.Zero)
+                        {
+                            GlobalFree(hGlobal);
+                            return false;
+                        }
+                        try
+                        {
+                            Marshal.Copy(text.ToCharArray(), 0, ptr, text.Length);
+                            Marshal.WriteInt16(ptr, text.Length * 2, 0);
+                        }
+                        finally
+                        {
+                            GlobalUnlock(hGlobal);
+                        }
+                        if (SetClipboardData(CF_UNICODETEXT, hGlobal) == IntPtr.Zero)
+                        {
+                            GlobalFree(hGlobal);
+                            return false;
+                        }
+                        if (excludeFromHistory)
+                        {
+                            SetClipboardDword(FormatExcludeMonitor, 1);
+                            SetClipboardDword(FormatCanIncludeHistory, 0);
+                            SetClipboardDword(FormatCanUploadCloud, 0);
+                        }
+                        return true;
+                    }
+                    finally
+                    {
+                        CloseClipboard();
+                    }
+                }
+                Thread.Sleep(2);
+            }
+            return false;
+        }
+
+        public static void BackupClipboard()
+        {
+            hadText = TryGetClipboardText(out backupText);
         }
 
         public static void RestoreClipboard()
         {
-            try
+            if (hadText && backupText != null)
             {
-                if (hadText && backupText != null)
-                {
-                    Clipboard.SetText(backupText);
-                }
+                TrySetClipboardText(backupText, true);
             }
-            catch { }
         }
 
         #endregion

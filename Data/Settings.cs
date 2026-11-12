@@ -57,6 +57,10 @@ namespace dotSwitcher.Data
             {
                 settings.RunAsAdmin = LowLevelAdapter.IsAutorunTaskExists() || LowLevelAdapter.IsRunningAsAdmin();
             }
+            if (settings.FilterLayouts == null)
+            {
+                settings.FilterLayouts = false;
+            }
             if (settings.SwitchDelay < 1)
             {
                 settings.SwitchDelay = 20;
@@ -197,6 +201,36 @@ namespace dotSwitcher.Data
             set
             {
                 this["SmartSelection"] = (bool?)value;
+            }
+        }
+
+        [UserScopedSetting]
+        [SettingsSerializeAs(SettingsSerializeAs.Binary)]
+        [DefaultSettingValue("")]
+        public bool? FilterLayouts
+        {
+            get
+            {
+                return (bool?)this["FilterLayouts"];
+            }
+            set
+            {
+                this["FilterLayouts"] = (bool?)value;
+            }
+        }
+
+        [UserScopedSetting]
+        [SettingsSerializeAs(SettingsSerializeAs.String)]
+        [DefaultSettingValue("")]
+        public string EnabledLayouts
+        {
+            get
+            {
+                return (string)this["EnabledLayouts"] ?? "";
+            }
+            set
+            {
+                this["EnabledLayouts"] = value ?? "";
             }
         }
     }

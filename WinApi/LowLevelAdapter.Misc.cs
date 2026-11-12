@@ -96,9 +96,44 @@ namespace dotSwitcher.WinApi
             int cchBuff,
             uint wFlags,
             IntPtr dwhkl);
+        [DllImport("user32.dll")]
+        private static extern uint GetClipboardSequenceNumber();
+        [DllImport("user32.dll", SetLastError = true)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        private static extern bool OpenClipboard(IntPtr hWndNewOwner);
+        [DllImport("user32.dll", SetLastError = true)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        private static extern bool CloseClipboard();
+        [DllImport("user32.dll", SetLastError = true)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        private static extern bool EmptyClipboard();
+        [DllImport("user32.dll")]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        private static extern bool IsClipboardFormatAvailable(uint format);
+        [DllImport("user32.dll", SetLastError = true)]
+        private static extern IntPtr GetClipboardData(uint uFormat);
+        [DllImport("user32.dll", SetLastError = true)]
+        private static extern IntPtr SetClipboardData(uint uFormat, IntPtr hMem);
+        [DllImport("user32.dll", CharSet = CharSet.Auto, SetLastError = true)]
+        private static extern uint RegisterClipboardFormat(string lpszFormat);
+        [DllImport("kernel32.dll", SetLastError = true)]
+        private static extern IntPtr GlobalAlloc(uint uFlags, UIntPtr dwBytes);
+        [DllImport("kernel32.dll", SetLastError = true)]
+        private static extern IntPtr GlobalFree(IntPtr hMem);
+        [DllImport("kernel32.dll", SetLastError = true)]
+        private static extern IntPtr GlobalLock(IntPtr hMem);
+        [DllImport("kernel32.dll", SetLastError = true)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        private static extern bool GlobalUnlock(IntPtr hMem);
+        [DllImport("msctf.dll")]
+        private static extern int TF_CreateInputProcessorProfiles(out ITfInputProcessorProfiles ppipr);
         #endregion
 
         public static uint WM_SHOW_SETTINGS = RegisterWindowMessage("WM_SHOW_SETTINGS");
+        public static readonly IntPtr InjectedExtraInfo = new IntPtr(0x444F5453); // "DOTS"
+        public const uint CF_UNICODETEXT = 13;
+        public const uint GMEM_MOVEABLE = 0x0002;
+        public const uint LLKHF_INJECTED = 0x00000010;
         public const uint MSGFLT_ADD = 1;
         public const int HWND_BROADCAST = 0xffff;
         public const int WH_KEYBOARD_LL = 13;
@@ -159,7 +194,7 @@ namespace dotSwitcher.WinApi
                         Scan = (UInt16)MapVirtualKey((uint)vkCode, 0),
                         Flags = flags,
                         Time = 0,
-                        ExtraInfo = IntPtr.Zero
+                        ExtraInfo = InjectedExtraInfo
                     }
                 }
             };
@@ -167,6 +202,16 @@ namespace dotSwitcher.WinApi
     }
 
     public delegate IntPtr HookProc(int code, IntPtr wParam, IntPtr lParam);
+
+    [StructLayout(LayoutKind.Sequential)]
+    public struct KBDLLHOOKSTRUCT
+    {
+        public uint vkCode;
+        public uint scanCode;
+        public uint flags;
+        public uint time;
+        public IntPtr dwExtraInfo;
+    }
 
     struct INPUT
     {
@@ -225,5 +270,23 @@ namespace dotSwitcher.WinApi
         public IntPtr hwndMoveSize;
         public IntPtr hwndCaret;
         public System.Drawing.Rectangle rcCaret;
+    }
+
+    [ComImport, Guid("1F02B6C5-7842-4EE6-8A0B-9A24183A95CA"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+    internal interface ITfInputProcessorProfiles
+    {
+        int Register([In] ref Guid rclsid);
+        int Unregister([In] ref Guid rclsid);
+        int AddLanguageProfile([In] ref Guid rclsid, ushort langid, [In] ref Guid guidProfile, [MarshalAs(UnmanagedType.LPWStr)] string pchDesc, uint cchDesc, [MarshalAs(UnmanagedType.LPWStr)] string pchIconFile, uint cchFile, uint uIconIndex);
+        int RemoveLanguageProfile([In] ref Guid rclsid, ushort langid, [In] ref Guid guidProfile);
+        int EnumInputProcessorInfo(out IntPtr ppEnum);
+        int GetDefaultLanguageProfile(ushort langid, [In] ref Guid catid, out Guid pclsid, out Guid pguidProfile);
+        int SetDefaultLanguageProfile(ushort langid, [In] ref Guid rclsid, [In] ref Guid guidProfile);
+        int ActivateLanguageProfile([In] ref Guid rclsid, ushort langid, [In] ref Guid guidProfile);
+        int GetActiveLanguageProfile([In] ref Guid rclsid, out ushort plangid, out Guid pguidProfile);
+        int GetLanguageProfileDescription([In] ref Guid rclsid, ushort langid, [In] ref Guid guidProfile, out IntPtr pbstrProfile);
+        int GetCurrentLanguage(out ushort plangid);
+        int ChangeCurrentLanguage(ushort langid);
+        int GetLanguageList(out IntPtr ppLangId, out uint pulCount);
     }
 }

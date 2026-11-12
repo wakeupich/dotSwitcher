@@ -77,20 +77,13 @@ namespace dotSwitcher.Switcher
             mouseHook.Stop();
         }
 
-        private void RunOnUiThread(Action action)
+        private void RunAsync(Action action)
         {
-            if (uiContext != null)
+            ThreadPool.QueueUserWorkItem(_ =>
             {
-                uiContext.Post(_ =>
-                {
-                    try { action(); }
-                    catch (Exception ex) { OnError(ex); }
-                }, null);
-            }
-            else
-            {
-                action();
-            }
+                try { action(); }
+                catch (Exception ex) { OnError(ex); }
+            });
         }
 
         // evtData.Handled must be set to true if the key is recognized as hotkey and doesn't need further processing
@@ -162,14 +155,17 @@ namespace dotSwitcher.Switcher
         private void onKeyRelease(KeyboardEventArgs evtData)
         {
             var switchLayoutHotkey = settings.SwitchLayoutHotkey;
-            if (readyToSwitch && switchLayoutHotkey != null && switchLayoutHotkey.KeyCode != Keys.None)
+            if (switchLayoutHotkey != null && switchLayoutHotkey.KeyCode != Keys.None)
             {
                 if (evtData.Equals(switchLayoutHotkey) || evtData.KeyCode == switchLayoutHotkey.KeyCode)
                 {
-                    readyToSwitch = false;
-                    SwitchLayout();
-                    evtData.Handled = false;
-                    return;
+                    if (readyToSwitch)
+                    {
+                        readyToSwitch = false;
+                        SwitchLayout();
+                        evtData.Handled = false;
+                        return;
+                    }
                 }
             }
         }
@@ -185,7 +181,7 @@ namespace dotSwitcher.Switcher
             {
                 readyToSwitch = false;
                 evtData.Handled = true;
-                RunOnUiThread(ConvertSelection);
+                RunAsync(ConvertSelection);
                 return;
             }
 
@@ -196,12 +192,13 @@ namespace dotSwitcher.Switcher
                 {
                     readyToSwitch = false;
                     evtData.Handled = true;
-                    RunOnUiThread(ConvertLast);
+                    RunAsync(ConvertLast);
                     return;
                 }
             }
 
-            if (switchLayoutHotkey != null && switchLayoutHotkey.KeyCode != Keys.None && evtData.Equals(switchLayoutHotkey))
+            if (switchLayoutHotkey != null && switchLayoutHotkey.KeyCode != Keys.None &&
+                evtData.Equals(switchLayoutHotkey))
             {
                 readyToSwitch = true;
                 if (!IsModifierKey(vkCode))
@@ -233,9 +230,15 @@ namespace dotSwitcher.Switcher
 
         private void OnError(Exception ex)
         {
-            if (Error != null)
+            var handler = Error;
+            if (handler == null) return;
+            if (uiContext != null)
             {
-                Error(this, new SwitcherErrorArgs(ex));
+                uiContext.Post(_ => handler(this, new SwitcherErrorArgs(ex)), null);
+            }
+            else
+            {
+                handler(this, new SwitcherErrorArgs(ex));
             }
         }
 
@@ -261,62 +264,64 @@ namespace dotSwitcher.Switcher
             try
             {
                 BeginNewSelection();
-                LowLevelAdapter.ReleasePressedFnKeys();
-                Thread.Sleep(15);
-
                 LowLevelAdapter.BackupClipboard();
-                try { Clipboard.Clear(); } catch { }
 
-                LowLevelAdapter.SendCopy();
-
-                string selection = null;
-                for (int attempt = 0; attempt < 12; attempt++)
+                if (LowLevelAdapter.ReleasePressedFnKeys())
                 {
-                    Thread.Sleep(15);
-                    try
-                    {
-                        if (Clipboard.ContainsText())
-                        {
-                            selection = Clipboard.GetText();
-                            if (!string.IsNullOrEmpty(selection))
-                            {
-                                break;
-                            }
-                        }
-                    }
-                    catch { }
+                    Thread.Sleep(4);
                 }
 
-                if (string.IsNullOrEmpty(selection))
+                uint seqBefore = LowLevelAdapter.GetClipboardSeqNumber();
+                LowLevelAdapter.SendCopy();
+
+                var sw = Stopwatch.StartNew();
+                bool retriedCopy = false;
+                while (sw.ElapsedMilliseconds < 110)
+                {
+                    Thread.Sleep(2);
+                    if (LowLevelAdapter.GetClipboardSeqNumber() != seqBefore)
+                    {
+                        break;
+                    }
+                    if (!retriedCopy && sw.ElapsedMilliseconds >= 45)
+                    {
+                        retriedCopy = true;
+                        LowLevelAdapter.ReleasePressedFnKeys();
+                        LowLevelAdapter.SendCopy();
+                    }
+                }
+
+                if (LowLevelAdapter.GetClipboardSeqNumber() == seqBefore)
+                {
+                    return;
+                }
+
+                string selection;
+                if (!LowLevelAdapter.TryGetClipboardText(out selection) || string.IsNullOrEmpty(selection))
                 {
                     LowLevelAdapter.RestoreClipboard();
                     return;
                 }
 
                 IntPtr targetHkl;
-                string converted = LowLevelAdapter.ConvertTextBetweenLayouts(selection, out targetHkl);
+                string converted = LowLevelAdapter.ConvertTextBetweenLayouts(selection, out targetHkl, settings);
                 if (string.IsNullOrEmpty(converted))
                 {
                     LowLevelAdapter.RestoreClipboard();
                     return;
                 }
 
-                try
-                {
-                    Clipboard.SetText(converted);
-                }
-                catch
+                if (!LowLevelAdapter.TrySetClipboardText(converted, true))
                 {
                     LowLevelAdapter.RestoreClipboard();
                     return;
                 }
 
-                Thread.Sleep(15);
                 LowLevelAdapter.ReleasePressedFnKeys();
                 LowLevelAdapter.SendPaste();
-                Thread.Sleep(Math.Max(40, settings.SwitchDelay));
-
                 LowLevelAdapter.SetKeyboardLayout(targetHkl);
+
+                Thread.Sleep(Math.Max(25, settings.SwitchDelay));
                 LowLevelAdapter.RestoreClipboard();
             }
             finally
@@ -328,7 +333,7 @@ namespace dotSwitcher.Switcher
         private void SwitchLayout()
         {
             BeginNewSelection();
-            LowLevelAdapter.SetNextKeyboardLayout();
+            LowLevelAdapter.SetNextKeyboardLayout(settings);
         }
 
         private void ConvertLast()
@@ -344,17 +349,16 @@ namespace dotSwitcher.Switcher
             isProcessing = true;
             try
             {
-                LowLevelAdapter.ReleasePressedFnKeys();
-                var backspaces = Enumerable.Repeat<Keys>(Keys.Back, selection.Count);
-
-                foreach (var vkCode in backspaces)
+                if (LowLevelAdapter.ReleasePressedFnKeys())
                 {
-                    LowLevelAdapter.SendKeyPress(vkCode, false);
+                    Thread.Sleep(3);
                 }
+
+                LowLevelAdapter.SendBackspaces(selection.Count);
 
                 Thread.Sleep(settings.SwitchDelay);
                 var vkList = selection.Select(x => x.KeyCode).ToList();
-                var targetHkl = LowLevelAdapter.GetNextLayoutForConversion(vkList);
+                var targetHkl = LowLevelAdapter.GetNextLayoutForConversion(vkList, settings);
                 LowLevelAdapter.SetKeyboardLayout(targetHkl);
                 Thread.Sleep(settings.SwitchDelay);
 

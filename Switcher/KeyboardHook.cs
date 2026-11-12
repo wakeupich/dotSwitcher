@@ -92,8 +92,13 @@ namespace dotSwitcher.Switcher
                     case LowLevelAdapter.WM_KEYUP:
                     case LowLevelAdapter.WM_SYSKEYUP:
 
-                        var keybdinput = (KEYBDINPUT)Marshal.PtrToStructure(lParam, typeof(KEYBDINPUT));
-                        var vk = (Keys)keybdinput.Vk;
+                        var kbdStruct = (KBDLLHOOKSTRUCT)Marshal.PtrToStructure(lParam, typeof(KBDLLHOOKSTRUCT));
+                        if (kbdStruct.dwExtraInfo == LowLevelAdapter.InjectedExtraInfo)
+                        {
+                            return;
+                        }
+
+                        var vk = (Keys)kbdStruct.vkCode;
                         var keyData = vk;
 
                         bool isCtrlKey = vk == Keys.ControlKey || vk == Keys.LControlKey || vk == Keys.RControlKey;
