@@ -53,6 +53,10 @@ namespace dotSwitcher.Data
             {
                 settings.SmartSelection = true;
             }
+            if (settings.AutoSwitch == null)
+            {
+                settings.AutoSwitch = true;
+            }
             if (settings.RunAsAdmin == null)
             {
                 settings.RunAsAdmin = LowLevelAdapter.IsAutorunTaskExists() || LowLevelAdapter.IsRunningAsAdmin();
@@ -201,6 +205,21 @@ namespace dotSwitcher.Data
             set
             {
                 this["SmartSelection"] = (bool?)value;
+            }
+        }
+
+        [UserScopedSetting]
+        [SettingsSerializeAs(SettingsSerializeAs.Binary)]
+        [DefaultSettingValue("")]
+        public bool? AutoSwitch
+        {
+            get
+            {
+                return (bool?)this["AutoSwitch"];
+            }
+            set
+            {
+                this["AutoSwitch"] = (bool?)value;
             }
         }
 

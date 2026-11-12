@@ -100,9 +100,11 @@ namespace dotSwitcher.UI
             checkBoxRunAsAdmin.Checked = settings.RunAsAdmin == true;
             checkBoxTrayIcon.Checked = settings.ShowTrayIcon == true;
             checkBoxSmartSelection.Checked = settings.SmartSelection == true;
+            checkBoxAutoSwitch.Checked = settings.AutoSwitch == true;
             DisplaySwitchDelay(settings.SwitchDelay);
             PopulateLayoutsUi();
             icon.SetRunning(engine.IsStarted());
+            icon.SetAutoSwitch(settings.AutoSwitch == true);
         }
 
         private bool isUpdatingLayoutsUi = false;
@@ -243,6 +245,13 @@ namespace dotSwitcher.UI
             icon.ExitClick += icon_ExitClick;
             icon.SettingsClick += icon_SettingsClick;
             icon.TogglePowerClick += icon_TogglePowerClick;
+            icon.ToggleAutoSwitchClick += icon_ToggleAutoSwitchClick;
+        }
+        void icon_ToggleAutoSwitchClick(object sender, EventArgs e)
+        {
+            settings.AutoSwitch = settings.AutoSwitch != true;
+            settings.Save();
+            UpdateUi();
         }
         void icon_TogglePowerClick(object sender, EventArgs e)
         {
@@ -528,6 +537,18 @@ namespace dotSwitcher.UI
             toolTip1.Hide(checkBoxSmartSelection);
         }
 
+        private void labelAutoSwitchHelp_MouseHover(object sender, EventArgs e)
+        {
+            toolTip1.Show(
+                "Automatically detects words typed in the wrong keyboard layout (using Windows Spell Checker + character N-gram model)\nand converts them on Space or a brief pause. Press Pause or Backspace right after to revert and ignore the word.",
+                checkBoxAutoSwitch);
+        }
+
+        private void labelAutoSwitchHelp_MouseLeave(object sender, EventArgs e)
+        {
+            toolTip1.Hide(checkBoxAutoSwitch);
+        }
+
         private void toolTip1_Popup(object sender, PopupEventArgs e)
         {
         }
@@ -535,6 +556,11 @@ namespace dotSwitcher.UI
         private void smartSelection_CheckedChanged(object sender, EventArgs e)
         {
             settings.SmartSelection = checkBoxSmartSelection.Checked;
+        }
+
+        private void checkBoxAutoSwitch_CheckedChanged(object sender, EventArgs e)
+        {
+            settings.AutoSwitch = checkBoxAutoSwitch.Checked;
         }
 
         private void radioLayouts_CheckedChanged(object sender, EventArgs e)

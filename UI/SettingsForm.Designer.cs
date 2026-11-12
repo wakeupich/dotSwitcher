@@ -54,6 +54,8 @@
             this.radioSelectedLayouts = new System.Windows.Forms.RadioButton();
             this.checkedListBoxLayouts = new System.Windows.Forms.CheckedListBox();
             this.labelSmartSelectionHelp = new System.Windows.Forms.Label();
+            this.checkBoxAutoSwitch = new System.Windows.Forms.CheckBox();
+            this.labelAutoSwitchHelp = new System.Windows.Forms.Label();
             this.groupBox1.SuspendLayout();
             this.groupBoxLayouts.SuspendLayout();
             this.SuspendLayout();
@@ -147,10 +149,35 @@
             this.labelSmartSelectionHelp.MouseLeave += new System.EventHandler(this.labelSmartSelectionHelp_MouseLeave);
             this.labelSmartSelectionHelp.MouseHover += new System.EventHandler(this.labelSmartSelectionHelp_MouseHover);
             // 
+            // checkBoxAutoSwitch
+            // 
+            this.checkBoxAutoSwitch.AutoSize = true;
+            this.checkBoxAutoSwitch.Checked = true;
+            this.checkBoxAutoSwitch.CheckState = System.Windows.Forms.CheckState.Checked;
+            this.checkBoxAutoSwitch.Location = new System.Drawing.Point(12, 110);
+            this.checkBoxAutoSwitch.Name = "checkBoxAutoSwitch";
+            this.checkBoxAutoSwitch.Size = new System.Drawing.Size(176, 17);
+            this.checkBoxAutoSwitch.TabIndex = 34;
+            this.checkBoxAutoSwitch.Text = "Auto-switch layout while typing";
+            this.checkBoxAutoSwitch.UseVisualStyleBackColor = true;
+            this.checkBoxAutoSwitch.CheckedChanged += new System.EventHandler(this.checkBoxAutoSwitch_CheckedChanged);
+            // 
+            // labelAutoSwitchHelp
+            // 
+            this.labelAutoSwitchHelp.AutoSize = true;
+            this.labelAutoSwitchHelp.Cursor = System.Windows.Forms.Cursors.Help;
+            this.labelAutoSwitchHelp.Location = new System.Drawing.Point(191, 111);
+            this.labelAutoSwitchHelp.Name = "labelAutoSwitchHelp";
+            this.labelAutoSwitchHelp.Size = new System.Drawing.Size(13, 13);
+            this.labelAutoSwitchHelp.TabIndex = 35;
+            this.labelAutoSwitchHelp.Text = "?";
+            this.labelAutoSwitchHelp.MouseLeave += new System.EventHandler(this.labelAutoSwitchHelp_MouseLeave);
+            this.labelAutoSwitchHelp.MouseHover += new System.EventHandler(this.labelAutoSwitchHelp_MouseHover);
+            // 
             // label3
             // 
             this.label3.AutoSize = true;
-            this.label3.Location = new System.Drawing.Point(10, 113);
+            this.label3.Location = new System.Drawing.Point(10, 132);
             this.label3.Name = "label3";
             this.label3.Size = new System.Drawing.Size(120, 13);
             this.label3.TabIndex = 26;
@@ -158,7 +185,7 @@
             // 
             // textBoxDelay
             // 
-            this.textBoxDelay.Location = new System.Drawing.Point(12, 130);
+            this.textBoxDelay.Location = new System.Drawing.Point(12, 148);
             this.textBoxDelay.Name = "textBoxDelay";
             this.textBoxDelay.Size = new System.Drawing.Size(60, 20);
             this.textBoxDelay.TabIndex = 25;
@@ -321,6 +348,8 @@
             this.AutoScaleMode = System.Windows.Forms.AutoScaleMode.Font;
             this.CancelButton = this.buttonCancelSettings;
             this.ClientSize = new System.Drawing.Size(410, 362);
+            this.Controls.Add(this.labelAutoSwitchHelp);
+            this.Controls.Add(this.checkBoxAutoSwitch);
             this.Controls.Add(this.labelSmartSelectionHelp);
             this.Controls.Add(this.groupBoxLayouts);
             this.Controls.Add(this.checkBoxSmartSelection);
@@ -376,5 +405,7 @@
         private System.Windows.Forms.RadioButton radioSelectedLayouts;
         private System.Windows.Forms.CheckedListBox checkedListBoxLayouts;
         private System.Windows.Forms.Label labelSmartSelectionHelp;
+        private System.Windows.Forms.CheckBox checkBoxAutoSwitch;
+        private System.Windows.Forms.Label labelAutoSwitchHelp;
     }
 }

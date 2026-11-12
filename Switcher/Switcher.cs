@@ -32,12 +32,21 @@ namespace dotSwitcher.Switcher
     public class SwitcherCore : IDisposable
     {
         public event EventHandler<SwitcherErrorArgs> Error;
+        private readonly object selectionLock = new object();
         private List<KeyboardEventArgs> currentSelection = new List<KeyboardEventArgs>();
+        private readonly List<KeyboardEventArgs> pendingUserKeys = new List<KeyboardEventArgs>();
+        private readonly HashSet<string> ignoredWords = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         private KeyboardHook kbdHook;
         private MouseHook mouseHook;
         private ISettings settings;
         private bool readyToSwitch;
         private volatile bool isProcessing;
+        private volatile bool isAutoSwitching;
+        private bool manualEditInCurrentWord;
+        private string lastAutoSwitchedOriginalWord;
+        private DateTime lastAutoSwitchTime = DateTime.MinValue;
+        private System.Threading.Timer autoSwitchIdleTimer;
+        private const int AutoSwitchIdleMs = 450;
         private SynchronizationContext uiContext;
 
         public SwitcherCore(ISettings settings)
@@ -48,6 +57,7 @@ namespace dotSwitcher.Switcher
             kbdHook.KeyboardEvent += ProcessKeyPress;
             mouseHook = new MouseHook();
             mouseHook.MouseEvent += ProcessMousePress;
+            autoSwitchIdleTimer = new System.Threading.Timer(OnAutoSwitchIdleTimer, null, Timeout.Infinite, Timeout.Infinite);
             readyToSwitch = false;
         }
 
@@ -73,8 +83,27 @@ namespace dotSwitcher.Switcher
         }
         public void Stop()
         {
+            CancelIdleTimer();
             kbdHook.Stop();
             mouseHook.Stop();
+        }
+
+        private void CancelIdleTimer()
+        {
+            if (autoSwitchIdleTimer != null)
+            {
+                try { autoSwitchIdleTimer.Change(Timeout.Infinite, Timeout.Infinite); }
+                catch { }
+            }
+        }
+
+        private void ScheduleIdleTimer()
+        {
+            if (autoSwitchIdleTimer != null && settings.AutoSwitch == true && !manualEditInCurrentWord)
+            {
+                try { autoSwitchIdleTimer.Change(AutoSwitchIdleMs, Timeout.Infinite); }
+                catch { }
+            }
         }
 
         private void RunAsync(Action action)
@@ -89,6 +118,24 @@ namespace dotSwitcher.Switcher
         // evtData.Handled must be set to true if the key is recognized as hotkey and doesn't need further processing
         private void ProcessKeyPress(object sender, KeyboardEventArgs evtData)
         {
+            if (isAutoSwitching)
+            {
+                if (evtData.Type == KeyboardEventType.KeyDown)
+                {
+                    bool isSpace = evtData.KeyCode == Keys.Space && !HaveModifiers(evtData);
+                    if (IsPrintable(evtData) || isSpace)
+                    {
+                        evtData.Handled = true;
+                        lock (selectionLock)
+                        {
+                            pendingUserKeys.Add(evtData);
+                            currentSelection.Add(evtData);
+                        }
+                    }
+                }
+                return;
+            }
+
             if (isProcessing)
             {
                 return;
@@ -110,7 +157,9 @@ namespace dotSwitcher.Switcher
         {
             try
             {
+                CancelIdleTimer();
                 readyToSwitch = false;
+                manualEditInCurrentWord = false;
                 BeginNewSelection();
             }
             catch (Exception ex)
@@ -179,7 +228,9 @@ namespace dotSwitcher.Switcher
 
             if (convertHotkey != null && convertHotkey.KeyCode != Keys.None && evtData.Equals(convertHotkey))
             {
+                CancelIdleTimer();
                 readyToSwitch = false;
+                manualEditInCurrentWord = false;
                 evtData.Handled = true;
                 RunAsync(ConvertSelection);
                 return;
@@ -190,7 +241,10 @@ namespace dotSwitcher.Switcher
                 // If SwitchHotkey and SwitchLayoutHotkey are different, handle ConvertLast immediately
                 if (switchLayoutHotkey == null || !switchHotkey.Equals(switchLayoutHotkey))
                 {
+                    CancelIdleTimer();
                     readyToSwitch = false;
+                    RememberRevertedAutoSwitchWord();
+                    manualEditInCurrentWord = true;
                     evtData.Handled = true;
                     RunAsync(ConvertLast);
                     return;
@@ -200,6 +254,7 @@ namespace dotSwitcher.Switcher
             if (switchLayoutHotkey != null && switchLayoutHotkey.KeyCode != Keys.None &&
                 evtData.Equals(switchLayoutHotkey))
             {
+                CancelIdleTimer();
                 readyToSwitch = true;
                 if (!IsModifierKey(vkCode))
                 {
@@ -213,19 +268,197 @@ namespace dotSwitcher.Switcher
             if (this.HaveTrackingKeys(evtData))
                 return;
 
+            CancelIdleTimer();
             var notModified = !this.HaveModifiers(evtData);
 
-            if (vkCode == Keys.Space && notModified) { AddToCurrentSelection(evtData); return; }
-            if (vkCode == Keys.Back && notModified) { RemoveLast(); return; }
-            if (IsPrintable(evtData))
+            if (vkCode == Keys.Space && notModified)
             {
-                if (GetPreviousVkCode() == Keys.Space && settings.SmartSelection == false) { BeginNewSelection(); }
+                if (settings.AutoSwitch == true && !manualEditInCurrentWord)
+                {
+                    List<KeyboardEventArgs> snapshot;
+                    HashSet<string> ignoredSnapshot;
+                    lock (selectionLock)
+                    {
+                        snapshot = new List<KeyboardEventArgs>(currentSelection);
+                        ignoredSnapshot = new HashSet<string>(ignoredWords, StringComparer.OrdinalIgnoreCase);
+                    }
+
+                    if (snapshot.Count >= 2)
+                    {
+                        var currentHkl = LowLevelAdapter.GetCurrentLayout();
+                        var allowedLayouts = LowLevelAdapter.GetAllowedLayouts(settings);
+                        var decision = AutoSwitchEngine.EvaluateAutoSwitch(
+                            snapshot,
+                            true,
+                            currentHkl,
+                            allowedLayouts,
+                            ignoredSnapshot);
+
+                        if (decision.ShouldSwitch)
+                        {
+                            evtData.Handled = true;
+                            AddToCurrentSelection(evtData);
+                            decision.KeysToRetype.Add(evtData);
+                            manualEditInCurrentWord = false;
+                            isAutoSwitching = true;
+                            RunAsync(() => PerformAutoSwitch(decision));
+                            return;
+                        }
+                    }
+                }
+
+                manualEditInCurrentWord = false;
                 AddToCurrentSelection(evtData);
                 return;
             }
 
+            if (vkCode == Keys.Back && notModified)
+            {
+                RememberRevertedAutoSwitchWord();
+                manualEditInCurrentWord = true;
+                RemoveLast();
+                return;
+            }
+
+            if (IsPrintable(evtData))
+            {
+                if (GetPreviousVkCode() == Keys.Space && settings.SmartSelection == false)
+                {
+                    BeginNewSelection();
+                }
+                AddToCurrentSelection(evtData);
+                ScheduleIdleTimer();
+                return;
+            }
+
             // default:
+            manualEditInCurrentWord = false;
             BeginNewSelection();
+        }
+
+        private void RememberRevertedAutoSwitchWord()
+        {
+            string word = lastAutoSwitchedOriginalWord;
+            if (!string.IsNullOrEmpty(word) && (DateTime.UtcNow - lastAutoSwitchTime).TotalSeconds < 6.0)
+            {
+                lock (selectionLock)
+                {
+                    ignoredWords.Add(word);
+                }
+                lastAutoSwitchedOriginalWord = null;
+            }
+        }
+
+        private void OnAutoSwitchIdleTimer(object state)
+        {
+            if (isProcessing || isAutoSwitching || settings.AutoSwitch != true || manualEditInCurrentWord)
+            {
+                return;
+            }
+
+            try
+            {
+                if (LowLevelAdapter.KeyPressed(Keys.ShiftKey) ||
+                    LowLevelAdapter.KeyPressed(Keys.ControlKey) ||
+                    LowLevelAdapter.KeyPressed(Keys.Menu) ||
+                    LowLevelAdapter.KeyPressed(Keys.LWin) ||
+                    LowLevelAdapter.KeyPressed(Keys.RWin))
+                {
+                    return;
+                }
+
+                List<KeyboardEventArgs> snapshot;
+                HashSet<string> ignoredSnapshot;
+                lock (selectionLock)
+                {
+                    if (currentSelection.Count < 4)
+                    {
+                        return;
+                    }
+                    var lastKey = currentSelection[currentSelection.Count - 1].KeyCode & Keys.KeyCode;
+                    if (lastKey == Keys.Space)
+                    {
+                        return;
+                    }
+                    snapshot = new List<KeyboardEventArgs>(currentSelection);
+                    ignoredSnapshot = new HashSet<string>(ignoredWords, StringComparer.OrdinalIgnoreCase);
+                }
+
+                var currentHkl = LowLevelAdapter.GetCurrentLayout();
+                var allowedLayouts = LowLevelAdapter.GetAllowedLayouts(settings);
+                var decision = AutoSwitchEngine.EvaluateAutoSwitch(
+                    snapshot,
+                    false,
+                    currentHkl,
+                    allowedLayouts,
+                    ignoredSnapshot);
+
+                if (decision.ShouldSwitch)
+                {
+                    isAutoSwitching = true;
+                    PerformAutoSwitch(decision);
+                }
+            }
+            catch (Exception ex)
+            {
+                isAutoSwitching = false;
+                OnError(ex);
+            }
+        }
+
+        private void PerformAutoSwitch(AutoSwitchDecision decision)
+        {
+            if (isProcessing)
+            {
+                isAutoSwitching = false;
+                return;
+            }
+
+            isProcessing = true;
+            try
+            {
+                lastAutoSwitchedOriginalWord = decision.OriginalWordKey;
+                lastAutoSwitchTime = DateTime.UtcNow;
+
+                if (LowLevelAdapter.ReleasePressedFnKeys())
+                {
+                    Thread.Sleep(3);
+                }
+
+                LowLevelAdapter.SendBackspaces(decision.ReplaceKeyCount);
+
+                Thread.Sleep(settings.SwitchDelay);
+                LowLevelAdapter.SetKeyboardLayout(decision.TargetHkl);
+                Thread.Sleep(settings.SwitchDelay);
+
+                foreach (var data in decision.KeysToRetype)
+                {
+                    LowLevelAdapter.SendKeyPress(data.KeyCode, data.Shift);
+                }
+            }
+            finally
+            {
+                List<KeyboardEventArgs> extraKeys = null;
+                lock (selectionLock)
+                {
+                    if (pendingUserKeys.Count > 0)
+                    {
+                        extraKeys = new List<KeyboardEventArgs>(pendingUserKeys);
+                        pendingUserKeys.Clear();
+                    }
+                }
+
+                if (extraKeys != null)
+                {
+                    foreach (var k in extraKeys)
+                    {
+                        LowLevelAdapter.SendKeyPress(k.KeyCode, k.Shift);
+                    }
+                }
+
+                isAutoSwitching = false;
+                isProcessing = false;
+            }
         }
 
         private void OnError(Exception ex)
@@ -245,15 +478,33 @@ namespace dotSwitcher.Switcher
         #region selection manipulation
         private Keys GetPreviousVkCode()
         {
-            if (currentSelection.Count == 0) { return Keys.None; }
-            return currentSelection[currentSelection.Count - 1].KeyCode;
+            lock (selectionLock)
+            {
+                if (currentSelection.Count == 0) { return Keys.None; }
+                return currentSelection[currentSelection.Count - 1].KeyCode;
+            }
         }
-        private void BeginNewSelection() { currentSelection.Clear(); }
-        private void AddToCurrentSelection(KeyboardEventArgs data) { currentSelection.Add(data); }
+        private void BeginNewSelection()
+        {
+            lock (selectionLock)
+            {
+                currentSelection.Clear();
+            }
+        }
+        private void AddToCurrentSelection(KeyboardEventArgs data)
+        {
+            lock (selectionLock)
+            {
+                currentSelection.Add(data);
+            }
+        }
         private void RemoveLast()
         {
-            if (currentSelection.Count == 0) { return; }
-            currentSelection.RemoveAt(currentSelection.Count - 1);
+            lock (selectionLock)
+            {
+                if (currentSelection.Count == 0) { return; }
+                currentSelection.RemoveAt(currentSelection.Count - 1);
+            }
         }
         #endregion
 
@@ -339,7 +590,11 @@ namespace dotSwitcher.Switcher
         private void ConvertLast()
         {
             if (isProcessing) return;
-            var selection = currentSelection.ToList();
+            List<KeyboardEventArgs> selection;
+            lock (selectionLock)
+            {
+                selection = currentSelection.ToList();
+            }
             if (selection.Count == 0)
             {
                 SwitchLayout();
@@ -376,6 +631,11 @@ namespace dotSwitcher.Switcher
         public void Dispose()
         {
             Stop();
+            if (autoSwitchIdleTimer != null)
+            {
+                autoSwitchIdleTimer.Dispose();
+                autoSwitchIdleTimer = null;
+            }
         }
     }
 

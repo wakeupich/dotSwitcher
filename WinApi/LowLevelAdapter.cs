@@ -572,6 +572,98 @@ namespace dotSwitcher.WinApi
             return sbResult.ToString();
         }
 
+        public static string KeysToString(IList<KeyboardEventArgs> keys, IntPtr hkl)
+        {
+            if (keys == null || keys.Count == 0)
+            {
+                return "";
+            }
+
+            var sb = new StringBuilder(keys.Count);
+            var keyState = new byte[256];
+            var charBuf = new StringBuilder(8);
+
+            for (int i = 0; i < keys.Count; i++)
+            {
+                var k = keys[i];
+                uint vk = (uint)(k.KeyCode & Keys.KeyCode);
+                if (vk == (uint)Keys.Space)
+                {
+                    sb.Append(' ');
+                    continue;
+                }
+                if (vk == (uint)Keys.Back)
+                {
+                    continue;
+                }
+
+                Array.Clear(keyState, 0, keyState.Length);
+                if (k.Shift)
+                {
+                    keyState[(int)Keys.ShiftKey] = 0x80;
+                }
+
+                uint scanCode = MapVirtualKeyEx(vk, 0, hkl);
+                charBuf.Clear();
+                int rc = ToUnicodeEx(vk, scanCode, keyState, charBuf, charBuf.Capacity, 0, hkl);
+                if (rc > 0)
+                {
+                    sb.Append(charBuf.ToString(0, rc));
+                }
+                else if (rc < 0)
+                {
+                    // Clear dead-key state
+                    ToUnicodeEx((uint)Keys.Space, MapVirtualKeyEx((uint)Keys.Space, 0, hkl), new byte[256], charBuf, charBuf.Capacity, 0, hkl);
+                }
+            }
+
+            return sb.ToString();
+        }
+
+        private static readonly HashSet<string> BlockedWindowClasses = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+        {
+            "UnityWndClass",
+            "UnrealWindow",
+            "CryENGINE",
+            "Valve001",
+            "Source2",
+            "SDL_app",
+            "GLFW30",
+            "LWJGL"
+        };
+
+        public static bool IsAutoSwitchBlockedWindow()
+        {
+            try
+            {
+                IntPtr fgWnd = GetForegroundWindow();
+                if (fgWnd == IntPtr.Zero)
+                {
+                    return false;
+                }
+
+                uint threadId = GetWindowThreadProcessId(fgWnd, IntPtr.Zero);
+                var info = new GUITHREADINFO();
+                info.cbSize = Marshal.SizeOf(info);
+                bool hasGuiInfo = GetGUIThreadInfo(threadId, ref info);
+
+                var classBuf = new StringBuilder(128);
+                if (GetClassName(fgWnd, classBuf, classBuf.Capacity) > 0)
+                {
+                    string cls = classBuf.ToString();
+                    if (BlockedWindowClasses.Contains(cls))
+                    {
+                        if (!hasGuiInfo || info.hwndCaret == IntPtr.Zero)
+                        {
+                            return true;
+                        }
+                    }
+                }
+            }
+            catch { }
+            return false;
+        }
+
         public static void SendCopy()
         {
             var ctrlDown = MakeKeyInput(Keys.LControlKey, true);
