@@ -27,6 +27,7 @@ using System.Data;
 using System.Diagnostics;
 using System.Drawing;
 using System.Linq;
+using System.Reflection;
 using System.Text;
 using System.Text.RegularExpressions;
 using System.Threading.Tasks;
@@ -45,15 +46,20 @@ namespace dotSwitcher.UI
             this.settings = settings;
             this.engine = engine;
             engine.Error += OnEngineError;
-            
+
+            LowLevelAdapter.AllowShowSettingsFromNonElevated();
+
             InitializeComponent();
             InitializeTrayIcon();
             InitializeHotkeyBoxes();
 
+            if (LowLevelAdapter.IsRunningAsAdmin())
+            {
+                this.Text = "dotSwitcher Settings (Administrator)";
+            }
+
             UpdateUi();
         }
-
-        
 
         /**
          * SETTINGS FORM
@@ -66,9 +72,13 @@ namespace dotSwitcher.UI
             TopMost = true;
             UpdateUi();
             Show();
+            Activate();
         }
+
         void HideForm()
         {
+            currentHotkeyType = HotKeyType.None;
+            currentHotkey = null;
             kbdHook.Stop();
             engine.Start();
             if (settings.ShowTrayIcon == true)
@@ -79,44 +89,52 @@ namespace dotSwitcher.UI
             UpdateUi();
             Hide();
         }
+
         // Update input values and icon state
         void UpdateUi()
         {
-            textBoxSwitchHotkey.Text = ReplaceCtrls(settings.SwitchHotkey.ToString());
-            textBoxConvertHotkey.Text = settings.ConvertSelectionHotkey.ToString();
-            textBoxSwitchLayoutHotkey.Text = ReplaceCtrls(settings.SwitchLayoutHotkey.ToString());
+            textBoxSwitchHotkey.Text = (settings.SwitchHotkey ?? KeyboardEventArgs.Empty).ToString();
+            textBoxConvertHotkey.Text = (settings.ConvertSelectionHotkey ?? KeyboardEventArgs.Empty).ToString();
+            textBoxSwitchLayoutHotkey.Text = (settings.SwitchLayoutHotkey ?? KeyboardEventArgs.Empty).ToString();
             checkBoxAutorun.Checked = settings.AutoStart == true;
+            checkBoxRunAsAdmin.Checked = settings.RunAsAdmin == true;
             checkBoxTrayIcon.Checked = settings.ShowTrayIcon == true;
             checkBoxSmartSelection.Checked = settings.SmartSelection == true;
             DisplaySwitchDelay(settings.SwitchDelay);
             icon.SetRunning(engine.IsStarted());
         }
+
         // also ESC
         void buttonCancelSettings_Click(object sender, EventArgs e)
         {
             ResetSettings();
             HideForm();
         }
+
         void buttonSaveSettings_Click(object sender, EventArgs e)
         {
-            if (settings.SwitchHotkey.Alt || settings.SwitchHotkey.Win)
+            ApplyCurrentHotkey();
+            if (settings.SwitchHotkey != null && (settings.SwitchHotkey.Alt || settings.SwitchHotkey.Win))
             {
-                MessageBox.Show("Sorry, win+ and alt+ hotkeys are not supported yet");
+                MessageBox.Show("Sorry, win+ and alt+ hotkeys are not supported yet for Convert last word");
                 return;
             }
             SaveSettings();
             HideForm();
         }
+
         void buttonExit_Click(object sender, EventArgs e)
         {
             ResetSettings();
             OnExit();
         }
+
         // initial hidden state
         void SettingsForm_Shown(object sender, EventArgs e)
         {
             HideForm();
         }
+
         // prevent the form from user-initiated closing ([x] click, Alt+F4, closing from taskbar)
         // (acts as Cancel)
         void SettingsForm_FormClosing(object sender, FormClosingEventArgs e)
@@ -129,7 +147,8 @@ namespace dotSwitcher.UI
             e.Cancel = true;
             ResetSettings();
             HideForm();
-        }     
+        }
+
         // receive window message from another instance
         protected override void WndProc(ref Message m)
         {
@@ -177,7 +196,7 @@ namespace dotSwitcher.UI
         {
             icon.ShowTooltip(e.Error.Message, ToolTipIcon.Error);
         }
-        
+
         /**
          * HOTKEY INPUTS
          */
@@ -185,47 +204,62 @@ namespace dotSwitcher.UI
         KeyboardEventArgs currentHotkey;
         HotKeyType currentHotkeyType;
         enum HotKeyType { None, Switch, Convert, SwitchLayout }
+
         void InitializeHotkeyBoxes()
         {
-            textBoxSwitchHotkey.GotFocus += (s, e) => currentHotkeyType = HotKeyType.Switch;
-            textBoxSwitchHotkey.Enter += (s, e) => currentHotkeyType = HotKeyType.Switch;
+            textBoxSwitchHotkey.GotFocus += (s, e) => { currentHotkeyType = HotKeyType.Switch; currentHotkey = null; };
+            textBoxSwitchHotkey.Enter += (s, e) => { currentHotkeyType = HotKeyType.Switch; currentHotkey = null; };
             textBoxSwitchHotkey.LostFocus += (s, e) => ApplyCurrentHotkey();
             textBoxSwitchHotkey.Leave += (s, e) => ApplyCurrentHotkey();
-            textBoxConvertHotkey.GotFocus += (s, e) => currentHotkeyType = HotKeyType.Convert;
-            textBoxConvertHotkey.Enter += (s, e) => currentHotkeyType = HotKeyType.Convert;
+
+            textBoxConvertHotkey.GotFocus += (s, e) => { currentHotkeyType = HotKeyType.Convert; currentHotkey = null; };
+            textBoxConvertHotkey.Enter += (s, e) => { currentHotkeyType = HotKeyType.Convert; currentHotkey = null; };
             textBoxConvertHotkey.LostFocus += (s, e) => ApplyCurrentHotkey();
             textBoxConvertHotkey.Leave += (s, e) => ApplyCurrentHotkey();
-            textBoxSwitchLayoutHotkey.GotFocus += (s, e) => currentHotkeyType = HotKeyType.SwitchLayout;
-            textBoxSwitchLayoutHotkey.Enter += (s, e) => currentHotkeyType = HotKeyType.SwitchLayout;
+
+            textBoxSwitchLayoutHotkey.GotFocus += (s, e) => { currentHotkeyType = HotKeyType.SwitchLayout; currentHotkey = null; };
+            textBoxSwitchLayoutHotkey.Enter += (s, e) => { currentHotkeyType = HotKeyType.SwitchLayout; currentHotkey = null; };
             textBoxSwitchLayoutHotkey.LostFocus += (s, e) => ApplyCurrentHotkey();
             textBoxSwitchLayoutHotkey.Leave += (s, e) => ApplyCurrentHotkey();
+
             currentHotkeyType = HotKeyType.None;
             kbdHook = new KeyboardHook();
             kbdHook.KeyboardEvent += kbdHook_KeyboardEvent;
         }
+
         void kbdHook_KeyboardEvent(object sender, KeyboardEventArgs e)
         {
-            if (currentHotkeyType != HotKeyType.None)
+            if (currentHotkeyType == HotKeyType.None)
             {
-                var vk = e.KeyCode;
-                if (vk == Keys.Escape || vk == Keys.Back)
-                {
-                    e.Handled = true;
-                    ResetCurrentHotkey(vk == Keys.Back);
-                    return;
-                }
-                if (vk != Keys.LMenu && vk != Keys.RMenu
-                    && vk != Keys.LWin && vk != Keys.RWin
-                    && vk != Keys.LShiftKey && vk != Keys.RShiftKey
-                    && vk != Keys.LControlKey && vk != Keys.RControlKey)
-                {
-                    e.Handled = true;
-                }
-                SetCurrentHotkeyInputText(e.ToString());
-                currentHotkey = e;
+                return;
             }
+
+            if (e.Type != KeyboardEventType.KeyDown)
+            {
+                return;
+            }
+
+            var vk = e.KeyCode;
+            if ((vk == Keys.Escape || vk == Keys.Back) && !e.HasModifiers())
+            {
+                e.Handled = true;
+                ResetCurrentHotkey(vk == Keys.Back);
+                return;
+            }
+
+            if (vk != Keys.LMenu && vk != Keys.RMenu
+                && vk != Keys.LWin && vk != Keys.RWin
+                && vk != Keys.LShiftKey && vk != Keys.RShiftKey
+                && vk != Keys.LControlKey && vk != Keys.RControlKey)
+            {
+                e.Handled = true;
+            }
+
+            currentHotkey = e;
+            StoreCurrentHotkey(currentHotkey);
+            SetCurrentHotkeyInputText(e.ToString());
         }
-        // TODO: refactor this (make HotkeyInput : TextBox)
+
         void SetCurrentHotkeyInputText(string text)
         {
             TextBox currentTextBox;
@@ -245,18 +279,7 @@ namespace dotSwitcher.UI
                     break;
             }
             if (currentTextBox == null) { return; }
-            Invoke((MethodInvoker)delegate { currentTextBox.Text = ReplaceCtrls(text); });
-        }
-
-        private string ReplaceCtrls(string text)
-        {
-            return text
-                .Replace("Control + LControlKey", "Left Ctrl")
-                .Replace("Control + RControlKey", "Right Ctrl")
-                .Replace("Shift + LShiftKey", "Left Shift")
-                .Replace("Shift + RShiftKey", "Right Shift")
-                .Replace("Alt + LMenu", "Left Alt")
-                .Replace("Alt + RMenu", "Right Alt");
+            Invoke((MethodInvoker)delegate { currentTextBox.Text = text; });
         }
 
         void ResetCurrentHotkey(bool clear)
@@ -264,19 +287,41 @@ namespace dotSwitcher.UI
             switch (currentHotkeyType)
             {
                 case HotKeyType.Switch:
-                    currentHotkey = clear ? null : settings.SwitchHotkey;
+                    currentHotkey = clear ? KeyboardEventArgs.Empty : settings.SwitchHotkey;
                     break;
                 case HotKeyType.Convert:
-                    currentHotkey = clear ? null : settings.ConvertSelectionHotkey;
+                    currentHotkey = clear ? KeyboardEventArgs.Empty : settings.ConvertSelectionHotkey;
                     break;
                 case HotKeyType.SwitchLayout:
-                    currentHotkey = clear ? null : settings.SwitchLayoutHotkey;
+                    currentHotkey = clear ? KeyboardEventArgs.Empty : settings.SwitchLayoutHotkey;
                     break;
                 default:
                     currentHotkey = null;
                     break;
             }
-            SetCurrentHotkeyInputText(currentHotkey == null ? "None" : ReplaceCtrls(currentHotkey.ToString()));
+            if (currentHotkey != null)
+            {
+                StoreCurrentHotkey(currentHotkey);
+            }
+            SetCurrentHotkeyInputText(currentHotkey == null ? "None" : currentHotkey.ToString());
+        }
+
+        void StoreCurrentHotkey(KeyboardEventArgs hk)
+        {
+            if (hk == null) return;
+            switch (currentHotkeyType)
+            {
+                case HotKeyType.Switch:
+                    settings.SwitchHotkey = hk;
+                    break;
+                case HotKeyType.Convert:
+                    settings.ConvertSelectionHotkey = hk;
+                    break;
+                case HotKeyType.SwitchLayout:
+                    settings.SwitchLayoutHotkey = hk;
+                    settings.SwitchLayoutInitialized = true;
+                    break;
+            }
         }
 
         void ApplyCurrentHotkey()
@@ -285,20 +330,8 @@ namespace dotSwitcher.UI
             {
                 return;
             }
-            switch (currentHotkeyType)
-            {
-                case HotKeyType.Switch:
-                    settings.SwitchHotkey = currentHotkey;
-                    break;
-                case HotKeyType.Convert:
-                    settings.ConvertSelectionHotkey = currentHotkey;
-                    break;
-                case HotKeyType.SwitchLayout:
-                    settings.SwitchLayoutHotkey = currentHotkey;
-                    break;
-                default:
-                    break;
-            }
+            StoreCurrentHotkey(currentHotkey);
+            currentHotkey = null;
             currentHotkeyType = HotKeyType.None;
         }
 
@@ -309,9 +342,41 @@ namespace dotSwitcher.UI
         {
             settings.Save();
 
-            if (settings.AutoStart == true) { LowLevelAdapter.CreateAutorunShortcut(); }
-            else { LowLevelAdapter.DeleteAutorunShortcut(); }
+            bool autoStart = settings.AutoStart == true;
+            bool runAsAdmin = settings.RunAsAdmin == true;
+
+            LowLevelAdapter.ConfigureAutorun(autoStart, runAsAdmin);
+
+            if (runAsAdmin && !LowLevelAdapter.IsRunningAsAdmin())
+            {
+                var res = MessageBox.Show(
+                    "Restart dotSwitcher as Administrator now so hotkeys also work in elevated windows?",
+                    "dotSwitcher",
+                    MessageBoxButtons.YesNo,
+                    MessageBoxIcon.Question);
+                if (res == DialogResult.Yes)
+                {
+                    RestartAsAdmin();
+                }
+            }
         }
+
+        void RestartAsAdmin()
+        {
+            try
+            {
+                var exePath = Assembly.GetExecutingAssembly().Location;
+                var psi = new ProcessStartInfo(exePath, "--restart-admin")
+                {
+                    UseShellExecute = true,
+                    Verb = "runas"
+                };
+                Process.Start(psi);
+                OnExit();
+            }
+            catch { }
+        }
+
         void ResetSettings()
         {
             settings.Reload();
@@ -324,14 +389,22 @@ namespace dotSwitcher.UI
         {
             settings.AutoStart = checkBoxAutorun.Checked;
         }
+
+        void checkBoxRunAsAdmin_CheckedChanged(object sender, EventArgs e)
+        {
+            settings.RunAsAdmin = checkBoxRunAsAdmin.Checked;
+        }
+
         private void checkBoxTrayIcon_CheckedChanged(object sender, EventArgs e)
         {
             settings.ShowTrayIcon = checkBoxTrayIcon.Checked;
         }
+
         void DisplaySwitchDelay(int delay)
         {
             textBoxDelay.Text = delay.ToString() + " ms";
         }
+
         private void textBoxDelay_TextChanged(object sender, EventArgs e)
         {
             short delay = 0;
@@ -354,14 +427,15 @@ namespace dotSwitcher.UI
                 Exit(this, null);
             }
         }
+
         private void buttonGithub_Click(object sender, EventArgs e)
         {
-            Process.Start("https://github.com/kurumpa/dotSwitcher/issues");
+            Process.Start("https://github.com/wakeupich/dotSwitcher/issues");
         }
 
         private void label5_MouseHover(object sender, EventArgs e)
         {
-            toolTip1.Show("Hold Ctrl or Shift button to assign Ctrl or Shift itself", textBoxSwitchLayoutHotkey);
+            toolTip1.Show("Click the box and press any key (e.g. Right Ctrl, Left Shift, Caps Lock) or Backspace to clear", textBoxSwitchLayoutHotkey);
         }
 
         private void label5_MouseLeave(object sender, EventArgs e)
@@ -371,7 +445,6 @@ namespace dotSwitcher.UI
 
         private void toolTip1_Popup(object sender, PopupEventArgs e)
         {
-
         }
 
         private void smartSelection_CheckedChanged(object sender, EventArgs e)

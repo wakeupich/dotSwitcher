@@ -35,14 +35,46 @@ namespace dotSwitcher
         /// The main entry point for the application.
         /// </summary>
         [STAThread]
-        static void Main()
+        static void Main(string[] args)
         {
-            if (mutex.WaitOne(TimeSpan.Zero, true))
+            if (args != null && args.Length > 0)
+            {
+                if (args[0] == "--create-task")
+                {
+                    Environment.ExitCode = LowLevelAdapter.CreateAutorunTask() ? 0 : 1;
+                    return;
+                }
+                if (args[0] == "--remove-task")
+                {
+                    LowLevelAdapter.DeleteAutorunTask();
+                    Environment.ExitCode = 0;
+                    return;
+                }
+            }
+
+            bool waitRestart = args != null && args.Length > 0 && args[0] == "--restart-admin";
+            bool acquired = false;
+            try
+            {
+                acquired = mutex.WaitOne(waitRestart ? TimeSpan.FromSeconds(5) : TimeSpan.Zero, true);
+            }
+            catch (AbandonedMutexException)
+            {
+                acquired = true;
+            }
+
+            if (acquired)
             {
                 Application.EnableVisualStyles();
                 Application.SetCompatibleTextRenderingDefault(false);
 
                 var settings = Settings.Init();
+                if (LowLevelAdapter.IsRunningAsAdmin() && settings.AutoStart == true && settings.RunAsAdmin == true)
+                {
+                    // Ensure scheduled task points to current executable path
+                    LowLevelAdapter.ConfigureAutorun(true, true);
+                }
+
                 var engine = new SwitcherCore(settings);
                 Application.ApplicationExit += (s, a) => { engine.Dispose(); };
                 var app = new SettingsForm(settings, engine);

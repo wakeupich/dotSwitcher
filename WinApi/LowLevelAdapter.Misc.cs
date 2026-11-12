@@ -46,11 +46,15 @@ namespace dotSwitcher.WinApi
         [DllImport("user32.dll", CharSet = CharSet.Auto, SetLastError = true)]
         private static extern IntPtr GetKeyboardLayout(uint WindowsThreadProcessID);
         [DllImport("user32.dll", CharSet = CharSet.Auto, SetLastError = true)]
-        private static extern bool PostMessage(IntPtr hhwnd, uint msg, uint wparam, uint lparam);
+        private static extern int GetKeyboardLayoutList(int nBuff, [Out] IntPtr[] lpList);
+        [DllImport("user32.dll", CharSet = CharSet.Auto, SetLastError = true)]
+        private static extern bool PostMessage(IntPtr hhwnd, uint msg, IntPtr wparam, IntPtr lparam);
         [DllImport("user32.dll", CharSet = CharSet.Auto, SetLastError = true)]
         private static extern IntPtr LoadKeyboardLayout(string pwszKLID, uint Flags);
         [DllImport("user32.dll", CharSet = CharSet.Auto)]
         private static extern short GetKeyState(int keyCode);
+        [DllImport("user32.dll", CharSet = CharSet.Auto)]
+        private static extern short GetAsyncKeyState(int keyCode);
         [DllImport("user32.dll")]
         private static extern IntPtr GetFocus();
         [DllImport("user32.dll")]
@@ -74,11 +78,28 @@ namespace dotSwitcher.WinApi
         static extern bool GetGUIThreadInfo(uint idThread, ref GUITHREADINFO lpgui);
         [DllImport("user32.dll")]
         public static extern uint RegisterWindowMessage(string message);
+        [DllImport("user32.dll", SetLastError = true)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        public static extern bool ChangeWindowMessageFilter(uint message, uint dwFlag);
         [DllImport("user32.dll", CharSet = CharSet.Unicode)]
         static extern short VkKeyScanEx(char ch, IntPtr dwhkl);
+        [DllImport("user32.dll")]
+        static extern uint MapVirtualKey(uint uCode, uint uMapType);
+        [DllImport("user32.dll")]
+        static extern uint MapVirtualKeyEx(uint uCode, uint uMapType, IntPtr dwhkl);
+        [DllImport("user32.dll", CharSet = CharSet.Unicode)]
+        static extern int ToUnicodeEx(
+            uint wVirtKey,
+            uint wScanCode,
+            byte[] lpKeyState,
+            [Out, MarshalAs(UnmanagedType.LPWStr)] StringBuilder pwszBuff,
+            int cchBuff,
+            uint wFlags,
+            IntPtr dwhkl);
         #endregion
 
         public static uint WM_SHOW_SETTINGS = RegisterWindowMessage("WM_SHOW_SETTINGS");
+        public const uint MSGFLT_ADD = 1;
         public const int HWND_BROADCAST = 0xffff;
         public const int WH_KEYBOARD_LL = 13;
         public const int WH_MOUSE_LL = 14;
@@ -89,9 +110,11 @@ namespace dotSwitcher.WinApi
         public const int WM_LBUTTONDOWN = 0x0201;
         public const int WM_RBUTTONDOWN = 0x0204;
         public const int INPUT_KEYBOARD = 1;
+        public const uint KEYEVENTF_EXTENDEDKEY = 0x0001;
         public const uint KEYEVENTF_KEYUP = 0x0002;
-        public const uint WM_INPUTLANGCHANGEREQUEST = 0x50;
-        public const uint INPUTLANGCHANGE_FORWARD = 0x02;
+        public const uint KEYEVENTF_UNICODE = 0x0004;
+        public const uint WM_INPUTLANGCHANGEREQUEST = 0x0050;
+        public const uint INPUTLANGCHANGE_FORWARD = 0x0002;
         public const uint HKL_NEXT = 1;
         public const uint WM_GETTEXT = 0x0D;
         public const uint WM_GETTEXTLENGTH = 0x0E;
@@ -99,8 +122,32 @@ namespace dotSwitcher.WinApi
         public const uint EM_SETSEL = 0xB1;
         public const uint EM_REPLACESEL = 0xC2;
 
+        private static bool IsExtendedKey(Keys vkCode)
+        {
+            return vkCode == Keys.RControlKey ||
+                   vkCode == Keys.RMenu ||
+                   vkCode == Keys.Insert ||
+                   vkCode == Keys.Delete ||
+                   vkCode == Keys.Home ||
+                   vkCode == Keys.End ||
+                   vkCode == Keys.Prior ||
+                   vkCode == Keys.Next ||
+                   vkCode == Keys.Left ||
+                   vkCode == Keys.Up ||
+                   vkCode == Keys.Right ||
+                   vkCode == Keys.Down ||
+                   vkCode == Keys.NumLock ||
+                   vkCode == Keys.PrintScreen ||
+                   vkCode == Keys.Divide;
+        }
+
         private static INPUT MakeKeyInput(Keys vkCode, bool down)
         {
+            uint flags = down ? 0u : KEYEVENTF_KEYUP;
+            if (IsExtendedKey(vkCode))
+            {
+                flags |= KEYEVENTF_EXTENDEDKEY;
+            }
             return new INPUT
             {
                 Type = INPUT_KEYBOARD,
@@ -109,15 +156,14 @@ namespace dotSwitcher.WinApi
                     Keyboard = new KEYBDINPUT
                     {
                         Vk = (UInt16)vkCode,
-                        Scan = 0,
-                        Flags = down ? 0 : KEYEVENTF_KEYUP,
+                        Scan = (UInt16)MapVirtualKey((uint)vkCode, 0),
+                        Flags = flags,
                         Time = 0,
                         ExtraInfo = IntPtr.Zero
                     }
                 }
             };
         }
-
     }
 
     public delegate IntPtr HookProc(int code, IntPtr wParam, IntPtr lParam);
@@ -180,6 +226,4 @@ namespace dotSwitcher.WinApi
         public IntPtr hwndCaret;
         public System.Drawing.Rectangle rcCaret;
     }
-
-
 }

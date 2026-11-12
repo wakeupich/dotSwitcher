@@ -67,7 +67,7 @@ namespace dotSwitcher.Switcher
         {
             bool isHandled;
             ProcessKeyboardEvent(nCode, wParam, lParam, out isHandled);
-            return isHandled?
+            return isHandled ?
                 new IntPtr(1) :
                 LowLevelAdapter.NextHook(nCode, wParam, lParam);
         }
@@ -78,7 +78,6 @@ namespace dotSwitcher.Switcher
             isHandled = false;
             try
             {
-
                 if (nCode < 0)
                     return;
 
@@ -94,13 +93,22 @@ namespace dotSwitcher.Switcher
                     case LowLevelAdapter.WM_SYSKEYUP:
 
                         var keybdinput = (KEYBDINPUT)Marshal.PtrToStructure(lParam, typeof(KEYBDINPUT));
-                        var keyData = (Keys)keybdinput.Vk;
+                        var vk = (Keys)keybdinput.Vk;
+                        var keyData = vk;
 
-                        keyData |= LowLevelAdapter.KeyPressed(Keys.ControlKey) ? Keys.Control : 0;
-                        keyData |= LowLevelAdapter.KeyPressed(Keys.Menu) ? Keys.Alt : 0;
-                        keyData |= LowLevelAdapter.KeyPressed(Keys.ShiftKey) ? Keys.Shift : 0;
+                        bool isCtrlKey = vk == Keys.ControlKey || vk == Keys.LControlKey || vk == Keys.RControlKey;
+                        bool isAltKey = vk == Keys.Menu || vk == Keys.LMenu || vk == Keys.RMenu;
+                        bool isShiftKey = vk == Keys.ShiftKey || vk == Keys.LShiftKey || vk == Keys.RShiftKey;
+                        bool isWinKey = vk == Keys.LWin || vk == Keys.RWin;
 
-                        var winPressed = LowLevelAdapter.KeyPressed(Keys.LWin) || LowLevelAdapter.KeyPressed(Keys.RWin);
+                        if (!isCtrlKey && LowLevelAdapter.KeyPressed(Keys.ControlKey))
+                            keyData |= Keys.Control;
+                        if (!isAltKey && LowLevelAdapter.KeyPressed(Keys.Menu))
+                            keyData |= Keys.Alt;
+                        if (!isShiftKey && LowLevelAdapter.KeyPressed(Keys.ShiftKey))
+                            keyData |= Keys.Shift;
+
+                        var winPressed = !isWinKey && (LowLevelAdapter.KeyPressed(Keys.LWin) || LowLevelAdapter.KeyPressed(Keys.RWin));
 
                         var args = new KeyboardEventArgs(keyData, winPressed, isKeyDownEvent ? KeyboardEventType.KeyDown : KeyboardEventType.KeyUp);
                         OnKeyboardEvent(args);

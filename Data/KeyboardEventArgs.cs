@@ -33,16 +33,38 @@ namespace dotSwitcher.Data
 
         public KeyboardEventType Type;
 
+        public static Keys NormalizeKeyData(Keys keyData)
+        {
+            var vk = keyData & Keys.KeyCode;
+            if (vk == Keys.ControlKey || vk == Keys.LControlKey || vk == Keys.RControlKey)
+            {
+                keyData &= ~Keys.Control;
+            }
+            if (vk == Keys.ShiftKey || vk == Keys.LShiftKey || vk == Keys.RShiftKey)
+            {
+                keyData &= ~Keys.Shift;
+            }
+            if (vk == Keys.Menu || vk == Keys.LMenu || vk == Keys.RMenu)
+            {
+                keyData &= ~Keys.Alt;
+            }
+            return keyData;
+        }
+
         public KeyboardEventArgs(SerializationInfo info, StreamingContext context)
-            : base((Keys)info.GetValue("keyData", typeof(Keys)))
+            : base(NormalizeKeyData((Keys)info.GetValue("keyData", typeof(Keys))))
         {
             Win = (bool)info.GetValue("winMod", typeof(bool));
+            if (KeyCode == Keys.LWin || KeyCode == Keys.RWin)
+            {
+                Win = false;
+            }
             Type = KeyboardEventType.KeyDown;
         }
         public KeyboardEventArgs(Keys keyData, bool isWinDown, KeyboardEventType type = KeyboardEventType.KeyDown)
-            : base(keyData)
+            : base(NormalizeKeyData(keyData))
         {
-            Win = isWinDown;
+            Win = (KeyCode == Keys.LWin || KeyCode == Keys.RWin) ? false : isWinDown;
             Type = type;
         }
         public new static readonly KeyboardEventArgs Empty = new KeyboardEventArgs(Keys.None, false, KeyboardEventType.Unknown);
@@ -59,7 +81,9 @@ namespace dotSwitcher.Data
             {
                 return false;
             }
-            var equals = p.KeyData == KeyData &&
+            var normThis = NormalizeKeyData(KeyData);
+            var normOther = NormalizeKeyData(p.KeyData);
+            var equals = normOther == normThis &&
                 p.KeyCode == KeyCode &&
                 p.Win == Win;
 
@@ -68,28 +92,73 @@ namespace dotSwitcher.Data
 
         public override int GetHashCode()
         {
-            return (int)(base.GetHashCode() ^  Win.GetHashCode());
+            return (int)(base.GetHashCode() ^ Win.GetHashCode());
         }
 
         public bool HasModifiers()
         {
             return Modifiers != Keys.None || Win;
         }
+
+        private static string FormatKeyCode(Keys keyCode)
+        {
+            switch (keyCode)
+            {
+                case Keys.LControlKey:
+                    return "Left Ctrl";
+                case Keys.RControlKey:
+                    return "Right Ctrl";
+                case Keys.ControlKey:
+                    return "Ctrl";
+                case Keys.LShiftKey:
+                    return "Left Shift";
+                case Keys.RShiftKey:
+                    return "Right Shift";
+                case Keys.ShiftKey:
+                    return "Shift";
+                case Keys.LMenu:
+                    return "Left Alt";
+                case Keys.RMenu:
+                    return "Right Alt";
+                case Keys.Menu:
+                    return "Alt";
+                case Keys.Cancel:
+                case Keys.Pause:
+                    return "Pause";
+                case Keys.Capital:
+                    return "Caps Lock";
+                case Keys.Back:
+                    return "Backspace";
+                default:
+                    return keyCode.ToString();
+            }
+        }
+
         public override string ToString()
         {
+            if (KeyCode == Keys.None && !HasModifiers())
+            {
+                return "None";
+            }
+
+            var isCtrlSelf = KeyCode == Keys.ControlKey || KeyCode == Keys.LControlKey || KeyCode == Keys.RControlKey;
+            var isShiftSelf = KeyCode == Keys.ShiftKey || KeyCode == Keys.LShiftKey || KeyCode == Keys.RShiftKey;
+            var isAltSelf = KeyCode == Keys.Menu || KeyCode == Keys.LMenu || KeyCode == Keys.RMenu;
+            var isWinSelf = KeyCode == Keys.LWin || KeyCode == Keys.RWin;
+
             var result =
-                (Shift ? Keys.Shift.ToString() + " + " : "") +
-                (Control ? Keys.Control.ToString() + " + " : "") +
-                (Alt ? Keys.Alt.ToString() + " + " : "") +
-                (Win ? "Win + " : "") +
-                ((Keys)KeyCode).ToString();
-            // TODO: add more readable key names (Oem-stuff and so on)
-            return result.Replace("Cancel", "Pause");
+                ((Control && !isCtrlSelf) ? "Control + " : "") +
+                ((Shift && !isShiftSelf) ? "Shift + " : "") +
+                ((Alt && !isAltSelf) ? "Alt + " : "") +
+                ((Win && !isWinSelf) ? "Win + " : "") +
+                FormatKeyCode(KeyCode);
+
+            return result;
         }
 
         public void GetObjectData(SerializationInfo info, StreamingContext context)
         {
-            info.AddValue("keyData", KeyData, typeof(Keys));
+            info.AddValue("keyData", NormalizeKeyData(KeyData), typeof(Keys));
             info.AddValue("winMod", Win, typeof(bool));
         }
     }

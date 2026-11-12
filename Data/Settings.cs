@@ -17,6 +17,7 @@
  *   along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
+using dotSwitcher.WinApi;
 using System;
 using System.Configuration;
 using System.Windows.Forms;
@@ -30,17 +31,31 @@ namespace dotSwitcher.Data
         {
             var settings = new Settings();
             settings.Reload();
-            if (settings.SwitchHotkey.KeyData == Keys.None)
+            if (settings.SwitchHotkey == null || settings.SwitchHotkey.KeyData == Keys.None)
             {
                 settings.SwitchHotkey = new KeyboardEventArgs(Keys.Pause, false);
             }
-            if (settings.ConvertSelectionHotkey.KeyData == Keys.None)
+            if (settings.ConvertSelectionHotkey == null || settings.ConvertSelectionHotkey.KeyData == Keys.None)
             {
                 settings.ConvertSelectionHotkey = new KeyboardEventArgs(Keys.Pause | Keys.Shift, false);
+            }
+            if (settings.SwitchLayoutHotkey == null ||
+                (settings.SwitchLayoutHotkey.KeyData == Keys.None && settings.SwitchLayoutInitialized != true))
+            {
+                settings.SwitchLayoutHotkey = new KeyboardEventArgs(Keys.RControlKey, false);
+                settings.SwitchLayoutInitialized = true;
             }
             if (settings.ShowTrayIcon == null)
             {
                 settings.ShowTrayIcon = true;
+            }
+            if (settings.SmartSelection == null)
+            {
+                settings.SmartSelection = true;
+            }
+            if (settings.RunAsAdmin == null)
+            {
+                settings.RunAsAdmin = LowLevelAdapter.IsAutorunTaskExists() || LowLevelAdapter.IsRunningAsAdmin();
             }
             if (settings.SwitchDelay < 1)
             {
@@ -57,7 +72,7 @@ namespace dotSwitcher.Data
         {
             get
             {
-                return (KeyboardEventArgs)this["SwitchHotkey"];
+                return (KeyboardEventArgs)this["SwitchHotkey"] ?? KeyboardEventArgs.Empty;
             }
             set
             {
@@ -72,7 +87,7 @@ namespace dotSwitcher.Data
         {
             get
             {
-                return (KeyboardEventArgs)this["ConvertSelectionHotkey"];
+                return (KeyboardEventArgs)this["ConvertSelectionHotkey"] ?? KeyboardEventArgs.Empty;
             }
             set
             {
@@ -87,11 +102,26 @@ namespace dotSwitcher.Data
         {
             get
             {
-                return (KeyboardEventArgs)this["SwitchLayoutHotkey"];
+                return (KeyboardEventArgs)this["SwitchLayoutHotkey"] ?? KeyboardEventArgs.Empty;
             }
             set
             {
                 this["SwitchLayoutHotkey"] = (KeyboardEventArgs)value;
+            }
+        }
+
+        [UserScopedSetting]
+        [SettingsSerializeAs(SettingsSerializeAs.Binary)]
+        [DefaultSettingValue("")]
+        public bool? SwitchLayoutInitialized
+        {
+            get
+            {
+                return (bool?)this["SwitchLayoutInitialized"];
+            }
+            set
+            {
+                this["SwitchLayoutInitialized"] = (bool?)value;
             }
         }
 
@@ -107,6 +137,21 @@ namespace dotSwitcher.Data
             set
             {
                 this["AutoStart"] = (bool?)value;
+            }
+        }
+
+        [UserScopedSetting]
+        [SettingsSerializeAs(SettingsSerializeAs.Binary)]
+        [DefaultSettingValue("")]
+        public bool? RunAsAdmin
+        {
+            get
+            {
+                return (bool?)this["RunAsAdmin"];
+            }
+            set
+            {
+                this["RunAsAdmin"] = (bool?)value;
             }
         }
 
@@ -155,5 +200,4 @@ namespace dotSwitcher.Data
             }
         }
     }
-    
 }
