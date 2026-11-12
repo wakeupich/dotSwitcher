@@ -127,6 +127,8 @@ namespace dotSwitcher.WinApi
         private static extern bool GlobalUnlock(IntPtr hMem);
         [DllImport("msctf.dll")]
         private static extern int TF_CreateInputProcessorProfiles(out ITfInputProcessorProfiles ppipr);
+        [DllImport("user32.dll", CharSet = CharSet.Auto, SetLastError = true)]
+        private static extern int GetClassName(IntPtr hWnd, StringBuilder lpClassName, int nMaxCount);
         #endregion
 
         public static uint WM_SHOW_SETTINGS = RegisterWindowMessage("WM_SHOW_SETTINGS");

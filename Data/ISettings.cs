@@ -25,6 +25,7 @@ namespace dotSwitcher.Data
         KeyboardEventArgs ConvertSelectionHotkey { get; set; }
         int SwitchDelay { get; set; }
         bool? SmartSelection { get; set; }
+        bool? AutoSwitch { get; set; }
         bool? RunAsAdmin { get; set; }
         bool? FilterLayouts { get; set; }
         string EnabledLayouts { get; set; }

@@ -32,17 +32,22 @@ namespace dotSwitcher.UI
         public event EventHandler<EventArgs> ExitClick;
         public event EventHandler<EventArgs> SettingsClick;
         public event EventHandler<EventArgs> TogglePowerClick;
+        public event EventHandler<EventArgs> ToggleAutoSwitchClick;
 
         private NotifyIcon trayIcon;
         private ContextMenu trayMenu;
         private MenuItem togglePowerItem;
+        private MenuItem autoSwitchItem;
         private bool wasShownBeforeTooltip;
 
         public TrayIcon (bool? visible = true)
 	    {
             trayMenu = new ContextMenu();
             togglePowerItem = new MenuItem("", OnPowerClick);
+            autoSwitchItem = new MenuItem("Auto-switch layout", OnAutoSwitchClick);
             trayMenu.MenuItems.Add(togglePowerItem);
+            trayMenu.MenuItems.Add(autoSwitchItem);
+            trayMenu.MenuItems.Add("-");
             trayMenu.MenuItems.Add("Settings", OnSettingsClick);
             trayMenu.MenuItems.Add("-");
             trayMenu.MenuItems.Add("Exit", OnExitClick);
@@ -61,6 +66,10 @@ namespace dotSwitcher.UI
         public void SetRunning(bool isRunning)
         {
             togglePowerItem.Text = isRunning ? "Turn off" : "Turn on";
+        }
+        public void SetAutoSwitch(bool enabled)
+        {
+            autoSwitchItem.Checked = enabled;
         }
         public void Show()
         {
@@ -99,6 +108,14 @@ namespace dotSwitcher.UI
             if (TogglePowerClick != null)
             {
                 TogglePowerClick(this, null);
+            }
+        }
+
+        private void OnAutoSwitchClick(object sender, EventArgs e)
+        {
+            if (ToggleAutoSwitchClick != null)
+            {
+                ToggleAutoSwitchClick(this, null);
             }
         }
 
