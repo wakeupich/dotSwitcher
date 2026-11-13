@@ -1,4 +1,4 @@
-﻿<?xml version="1.0" encoding="utf-8"?>
+<?xml version="1.0" encoding="utf-8"?>
 <Project ToolsVersion="12.0" DefaultTargets="Build" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
   <Import Project="$(MSBuildExtensionsPath)\$(MSBuildToolsVersion)\Microsoft.Common.props" Condition="Exists('$(MSBuildExtensionsPath)\$(MSBuildToolsVersion)\Microsoft.Common.props')" />
   <PropertyGroup>
@@ -62,12 +62,6 @@
     <Compile Include="Switcher\KeyboardHook.cs" />
     <Compile Include="Switcher\MouseHook.cs" />
     <Compile Include="Switcher\Switcher.cs" />
-    <Compile Include="UI\HotKeyBox.cs">
-      <SubType>Component</SubType>
-    </Compile>
-    <Compile Include="UI\HotKeyBox.Designer.cs">
-      <DependentUpon>HotKeyBox.cs</DependentUpon>
-    </Compile>
     <Compile Include="UI\Loc.cs" />
     <Compile Include="UI\SettingsForm.cs">
       <SubType>Form</SubType>
@@ -105,11 +99,6 @@
   <ItemGroup>
     <Content Include="icon.ico" />
     <Content Include="UI\github.png" />
-  </ItemGroup>
-  <ItemGroup>
-    <Reference Include="System" />
-    <Reference Include="System.Drawing" />
-    <Reference Include="System.Windows.Forms" />
   </ItemGroup>
   <PropertyGroup>
     <FrameworkPathOverride Condition="!Exists('$(MSBuildProgramFiles32)\Reference Assemblies\Microsoft\Framework\.NETFramework\v4.6.1')">C:\Windows\Microsoft.NET\Framework64\v4.0.30319</FrameworkPathOverride>

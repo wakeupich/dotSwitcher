@@ -1,4 +1,4 @@
-﻿/**
+/**
  *   DotSwitcher: a simple keyboard layout switcher
  *   Copyright (C) 2014-2019 Kirill Mokhovtsev / kurumpa
  *   Contact: kiev.programmer@gmail.com
@@ -19,6 +19,7 @@
 
 using dotSwitcher.WinApi;
 using System;
+using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
 using System.Linq;
@@ -401,11 +402,23 @@ namespace dotSwitcher.Data
 
         private sealed class LegacySettingsBinder : SerializationBinder
         {
+            // Strict allow-list: only types that actually appear in the legacy
+            // user.config may be resolved. Everything else is rejected, which
+            // blocks arbitrary-type deserialization gadget chains (BinaryFormatter RCE).
+            private static readonly HashSet<string> AllowedTypes = new HashSet<string>(StringComparer.Ordinal)
+            {
+                "dotSwitcher.Data.KeyboardEventArgs",
+                "System.Windows.Forms.KeyEventArgs",
+                "System.EventArgs",
+                "System.Windows.Forms.Keys",
+                "System.Object"
+            };
+
             public override Type BindToType(string assemblyName, string typeName)
             {
-                if (string.Equals(typeName, "dotSwitcher.Data.KeyboardEventArgs", StringComparison.Ordinal))
+                if (!AllowedTypes.Contains(typeName))
                 {
-                    return typeof(KeyboardEventArgs);
+                    return null;
                 }
                 return Type.GetType(string.Format("{0}, {1}", typeName, assemblyName), false);
             }

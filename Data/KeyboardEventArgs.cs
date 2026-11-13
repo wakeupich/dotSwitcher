@@ -1,4 +1,4 @@
-﻿/**
+/**
  *   DotSwitcher: a simple keyboard layout switcher
  *   Copyright (C) 2014-2019 Kirill Mokhovtsev / kurumpa
  *   Contact: kiev.programmer@gmail.com
@@ -92,7 +92,14 @@ namespace dotSwitcher.Data
 
         public override int GetHashCode()
         {
-            return (int)(base.GetHashCode() ^ Win.GetHashCode());
+            unchecked
+            {
+                int hash = 17;
+                hash = hash * 31 + NormalizeKeyData(KeyData).GetHashCode();
+                hash = hash * 31 + KeyCode.GetHashCode();
+                hash = hash * 31 + Win.GetHashCode();
+                return hash;
+            }
         }
 
         public bool HasModifiers()

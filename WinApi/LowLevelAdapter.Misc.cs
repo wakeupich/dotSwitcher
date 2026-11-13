@@ -1,4 +1,4 @@
-﻿/**
+/**
  *   DotSwitcher: a simple keyboard layout switcher
  *   Copyright (C) 2014-2019 Kirill Mokhovtsev / kurumpa
  *   Contact: kiev.programmer@gmail.com
@@ -41,30 +41,18 @@ namespace dotSwitcher.WinApi
         private static extern uint GetWindowThreadProcessId(IntPtr hWnd, IntPtr ProcessId);
         [DllImport("user32.dll", CharSet = CharSet.Auto, SetLastError = true)]
         private static extern IntPtr GetForegroundWindow();
-        [DllImport("User32.dll", CharSet = CharSet.Auto, SetLastError = true)]
-        private static extern bool SetForegroundWindow(IntPtr hWnd);
         [DllImport("user32.dll", CharSet = CharSet.Auto, SetLastError = true)]
         private static extern IntPtr GetKeyboardLayout(uint WindowsThreadProcessID);
         [DllImport("user32.dll", CharSet = CharSet.Auto, SetLastError = true)]
         private static extern int GetKeyboardLayoutList(int nBuff, [Out] IntPtr[] lpList);
         [DllImport("user32.dll", CharSet = CharSet.Auto, SetLastError = true)]
         private static extern bool PostMessage(IntPtr hhwnd, uint msg, IntPtr wparam, IntPtr lparam);
-        [DllImport("user32.dll", CharSet = CharSet.Auto, SetLastError = true)]
-        private static extern IntPtr LoadKeyboardLayout(string pwszKLID, uint Flags);
         [DllImport("user32.dll", CharSet = CharSet.Auto)]
         private static extern short GetKeyState(int keyCode);
         [DllImport("user32.dll", CharSet = CharSet.Auto)]
         private static extern short GetAsyncKeyState(int keyCode);
         [DllImport("user32.dll")]
         private static extern IntPtr GetFocus();
-        [DllImport("user32.dll")]
-        private static extern int SendMessage(IntPtr hWnd, uint Msg, int wParam, StringBuilder lParam);
-        [DllImport("user32.dll")]
-        private static extern int SendMessage(IntPtr hWnd, uint Msg, int wParam, string lParam);
-        [DllImport("user32.dll")]
-        static extern int SendMessage(IntPtr hWnd, uint Msg, out int wParam, out int lParam);
-        [DllImport("user32.dll")]
-        static extern int SendMessage(IntPtr hWnd, uint Msg, int wParam, int lParam);
         [DllImport("user32.dll", SetLastError = true)]
         private static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint lpdwProcessId);
         [DllImport("kernel32.dll")]
@@ -81,6 +69,9 @@ namespace dotSwitcher.WinApi
         [DllImport("user32.dll", SetLastError = true)]
         [return: MarshalAs(UnmanagedType.Bool)]
         public static extern bool ChangeWindowMessageFilter(uint message, uint dwFlag);
+        [DllImport("user32.dll", SetLastError = true)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        public static extern bool ChangeWindowMessageFilterEx(IntPtr hWnd, uint message, uint action, IntPtr pChangeFilterStruct);
         [DllImport("user32.dll", CharSet = CharSet.Unicode)]
         static extern short VkKeyScanEx(char ch, IntPtr dwhkl);
         [DllImport("user32.dll")]
@@ -134,9 +125,14 @@ namespace dotSwitcher.WinApi
         public static uint WM_SHOW_SETTINGS = RegisterWindowMessage("WM_SHOW_SETTINGS");
         public static readonly IntPtr InjectedExtraInfo = new IntPtr(0x444F5453); // "DOTS"
         public const uint CF_UNICODETEXT = 13;
+        public const uint CF_BITMAP = 2;
+        public const uint CF_DIB = 8;
+        public const uint CF_ENHMETAFILE = 14;
+        public const uint CF_HDROP = 15;
+        public const uint CF_DIBV5 = 17;
         public const uint GMEM_MOVEABLE = 0x0002;
-        public const uint LLKHF_INJECTED = 0x00000010;
         public const uint MSGFLT_ADD = 1;
+        public const uint MSGFLT_ALLOW = 1;
         public const int HWND_BROADCAST = 0xffff;
         public const int WH_KEYBOARD_LL = 13;
         public const int WH_MOUSE_LL = 14;
@@ -153,11 +149,6 @@ namespace dotSwitcher.WinApi
         public const uint WM_INPUTLANGCHANGEREQUEST = 0x0050;
         public const uint INPUTLANGCHANGE_FORWARD = 0x0002;
         public const uint HKL_NEXT = 1;
-        public const uint WM_GETTEXT = 0x0D;
-        public const uint WM_GETTEXTLENGTH = 0x0E;
-        public const uint EM_GETSEL = 0xB0;
-        public const uint EM_SETSEL = 0xB1;
-        public const uint EM_REPLACESEL = 0xC2;
 
         private static bool IsExtendedKey(Keys vkCode)
         {

@@ -29,6 +29,7 @@ using System.Net;
 using System.Reflection;
 using System.Runtime.Serialization;
 using System.Runtime.Serialization.Json;
+using System.Security.Cryptography;
 using System.Text;
 using System.Threading;
 using System.Windows.Forms;
@@ -44,6 +45,8 @@ namespace dotSwitcher.Switcher
         public string BrowserDownloadUrl { get; set; }
         [DataMember(Name = "size")]
         public long Size { get; set; }
+        [DataMember(Name = "digest")]
+        public string Digest { get; set; }
     }
 
     [DataContract]
@@ -69,6 +72,8 @@ namespace dotSwitcher.Switcher
         public long InstallerSize { get; set; }
         public string ExeUrl { get; set; }
         public long ExeSize { get; set; }
+        public string InstallerDigest { get; set; }
+        public string ExeDigest { get; set; }
     }
 
     public static class AutoUpdater
@@ -142,7 +147,7 @@ namespace dotSwitcher.Switcher
 
             try
             {
-                ServicePointManager.SecurityProtocol |= SecurityProtocolType.Tls12;
+                EnsureSecureTls();
 
                 var req = (HttpWebRequest)WebRequest.Create(LatestReleaseApiUrl);
                 req.Method = "GET";
@@ -198,11 +203,13 @@ namespace dotSwitcher.Switcher
                         {
                             result.InstallerUrl = url;
                             result.InstallerSize = size;
+                            result.InstallerDigest = asset.Digest;
                         }
                         else if (string.Equals(name, "dotSwitcher.exe", StringComparison.OrdinalIgnoreCase))
                         {
                             result.ExeUrl = url;
                             result.ExeSize = size;
+                            result.ExeDigest = asset.Digest;
                         }
                     }
                 }
@@ -229,7 +236,7 @@ namespace dotSwitcher.Switcher
 
             try
             {
-                ServicePointManager.SecurityProtocol |= SecurityProtocolType.Tls12;
+                EnsureSecureTls();
                 string currentExe = Assembly.GetExecutingAssembly().Location;
                 string currentDir = Path.GetDirectoryName(currentExe);
                 bool preferSetup = IsInstalledInCurrentDir(currentDir) && !string.IsNullOrEmpty(update.InstallerUrl);
@@ -237,7 +244,7 @@ namespace dotSwitcher.Switcher
                 if (preferSetup)
                 {
                     string tempSetup = Path.Combine(Path.GetTempPath(), string.Format("dotSwitcher-Setup-{0:N}.exe", Guid.NewGuid()));
-                    if (!DownloadBinary(update.InstallerUrl, update.InstallerSize, tempSetup, out error))
+                    if (!DownloadBinary(update.InstallerUrl, update.InstallerSize, tempSetup, update.InstallerDigest, out error))
                     {
                         TryDeleteFile(tempSetup);
                         return false;
@@ -259,7 +266,7 @@ namespace dotSwitcher.Switcher
                 if (!string.IsNullOrEmpty(update.ExeUrl))
                 {
                     string tempExe = Path.Combine(Path.GetTempPath(), string.Format("dotSwitcher-update-{0:N}.exe", Guid.NewGuid()));
-                    if (!DownloadBinary(update.ExeUrl, update.ExeSize, tempExe, out error))
+                    if (!DownloadBinary(update.ExeUrl, update.ExeSize, tempExe, update.ExeDigest, out error))
                     {
                         TryDeleteFile(tempExe);
                         return false;
@@ -415,7 +422,7 @@ namespace dotSwitcher.Switcher
             }
         }
 
-        private static bool DownloadBinary(string url, long expectedSize, string destPath, out string error)
+        private static bool DownloadBinary(string url, long expectedSize, string destPath, string expectedSha256, out string error)
         {
             error = null;
             try
@@ -438,12 +445,18 @@ namespace dotSwitcher.Switcher
                     return false;
                 }
 
-                byte[] magic = new byte[2];
-                using (var fs = File.OpenRead(destPath))
+                if (!IsValidPeFile(destPath))
                 {
-                    if (fs.Read(magic, 0, 2) < 2 || magic[0] != (byte)'M' || magic[1] != (byte)'Z')
+                    error = "Downloaded file is not a valid Windows executable.";
+                    return false;
+                }
+
+                if (!string.IsNullOrWhiteSpace(expectedSha256))
+                {
+                    string actual = ComputeSha256(destPath);
+                    if (!string.Equals(actual, NormalizeSha256(expectedSha256), StringComparison.OrdinalIgnoreCase))
                     {
-                        error = "Downloaded file is not a valid Windows executable.";
+                        error = "Downloaded file checksum mismatch.";
                         return false;
                     }
                 }
@@ -481,28 +494,63 @@ namespace dotSwitcher.Switcher
             catch { }
         }
 
-        private static string GetString(Dictionary<string, object> dict, string key)
+        private static void EnsureSecureTls()
         {
-            object val;
-            if (dict.TryGetValue(key, out val) && val != null)
-            {
-                return val.ToString();
-            }
-            return "";
+            const SecurityProtocolType insecure = SecurityProtocolType.Ssl3 | SecurityProtocolType.Tls | SecurityProtocolType.Tls11;
+            ServicePointManager.SecurityProtocol = (ServicePointManager.SecurityProtocol & ~insecure) | SecurityProtocolType.Tls12;
         }
 
-        private static long GetLong(Dictionary<string, object> dict, string key)
+        private static bool IsValidPeFile(string path)
         {
-            object val;
-            if (dict.TryGetValue(key, out val) && val != null)
+            try
             {
-                long res;
-                if (long.TryParse(val.ToString(), out res))
+                using (var fs = File.OpenRead(path))
                 {
-                    return res;
+                    if (fs.Length < 64) return false;
+                    byte[] mz = new byte[2];
+                    if (fs.Read(mz, 0, 2) < 2 || mz[0] != (byte)'M' || mz[1] != (byte)'Z') return false;
+                    fs.Seek(0x3C, SeekOrigin.Begin);
+                    byte[] off = new byte[4];
+                    if (fs.Read(off, 0, 4) < 4) return false;
+                    int peOffset = BitConverter.ToInt32(off, 0);
+                    if (peOffset <= 0 || peOffset > fs.Length - 4) return false;
+                    fs.Seek(peOffset, SeekOrigin.Begin);
+                    byte[] sig = new byte[4];
+                    if (fs.Read(sig, 0, 4) < 4) return false;
+                    return sig[0] == (byte)'P' && sig[1] == (byte)'E' && sig[2] == 0 && sig[3] == 0;
                 }
             }
-            return 0;
+            catch
+            {
+                return false;
+            }
+        }
+
+        private static string ComputeSha256(string path)
+        {
+            using (var sha = SHA256.Create())
+            using (var fs = File.OpenRead(path))
+            {
+                byte[] hash = sha.ComputeHash(fs);
+                var sb = new StringBuilder(hash.Length * 2);
+                for (int i = 0; i < hash.Length; i++)
+                {
+                    sb.Append(hash[i].ToString("x2"));
+                }
+                return sb.ToString();
+            }
+        }
+
+        private static string NormalizeSha256(string digest)
+        {
+            if (string.IsNullOrWhiteSpace(digest)) return null;
+            string d = digest.Trim();
+            const string prefix = "sha256:";
+            if (d.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+            {
+                d = d.Substring(prefix.Length);
+            }
+            return d;
         }
     }
 }

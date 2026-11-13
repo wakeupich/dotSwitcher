@@ -22,6 +22,7 @@ using dotSwitcher.WinApi;
 using System;
 using System.Collections.Generic;
 using System.Globalization;
+using System.IO;
 using System.Runtime.InteropServices;
 using System.Text;
 using System.Windows.Forms;
@@ -88,8 +89,8 @@ namespace dotSwitcher.Switcher
             "bat", "ps1", "cfg", "ini", "env", "log", "tmp", "usr", "var", "etc", "bin", "src", "dev", "prod",
             "test", "main", "root", "admin", "sudo", "grep", "curl", "wget", "nano", "vim", "cat", "chmod",
             "chown", "docker", "kubectl", "winget", "choco", "msbuild", "dotnet", "nuget", "github", "gitlab",
-            "powershell", "windows", "linux", "ubuntu", "debian", "mikrotik", "zyxel", ***REMOVED***, ***REMOVED***,
-            ***REMOVED***, "caliber", "ipconfig", "netstat", "tracert", "nslookup", "schtasks", "taskkill", "regedit",
+            "powershell", "windows", "linux", "ubuntu", "debian", "mikrotik", "zyxel",
+            "caliber", "ipconfig", "netstat", "tracert", "nslookup", "schtasks", "taskkill", "regedit",
             "localhost", "boolean", "string", "int", "void", "null", "true", "false", "async", "await", "return",
             "public", "private", "static", "class", "struct", "interface"
         };
@@ -107,7 +108,7 @@ namespace dotSwitcher.Switcher
             "че", "чё", "ща", "щас", "спс", "пж", "плиз", "норм", "инфа", "инфу", "ава", "лвл", "го", "хз",
             "имхо", "изи", "топчик", "сервак", "админка", "деплой", "конфиг", "свитчер", "раскладка", "хоткей",
             "бэкап", "роутер", "флешка", "винда", "скрин", "скриншот", "скрипт", "коммит", "релиз", "приложуха",
-            "аватарка", "видосик", "багулина", ***REMOVED***, ***REMOVED***, ***REMOVED***, ***REMOVED***, ***REMOVED***
+            "аватарка", "видосик", "багулина"
         };
 
         // Short 2-3 letter words that exist in EN dictionary as rare/archaic/slang words
@@ -126,6 +127,36 @@ namespace dotSwitcher.Switcher
         {
             '.', ',', '!', '?', ':', ';', '"', '\'', '(', ')', '[', ']', '{', '}', '<', '>'
         };
+
+        // Optional user-provided dictionary: %LOCALAPPDATA%\dotSwitcher\dictionary.txt
+        // (one word per line; '#' starts a comment). Words here are always treated as
+        // valid, so personal names/hostnames can live outside the public source tree.
+        private static readonly HashSet<string> PersonalWords = LoadPersonalWords();
+
+        private static HashSet<string> LoadPersonalWords()
+        {
+            var set = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            try
+            {
+                string dir = Path.Combine(
+                    Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                    "dotSwitcher");
+                string file = Path.Combine(dir, "dictionary.txt");
+                if (File.Exists(file))
+                {
+                    foreach (var raw in File.ReadAllLines(file))
+                    {
+                        var w = raw.Trim();
+                        if (w.Length > 0 && !w.StartsWith("#", StringComparison.Ordinal))
+                        {
+                            set.Add(w);
+                        }
+                    }
+                }
+            }
+            catch { }
+            return set;
+        }
 
         #endregion
 
@@ -233,6 +264,11 @@ namespace dotSwitcher.Switcher
             if (HasInternalNonLetters(word, iso))
             {
                 return false;
+            }
+
+            if (PersonalWords.Count > 0 && PersonalWords.Contains(word))
+            {
+                return true;
             }
 
             if (iso == "en" && CommonEnTechWords.Contains(word))

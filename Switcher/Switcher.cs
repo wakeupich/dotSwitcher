@@ -42,9 +42,10 @@ namespace dotSwitcher.Switcher
         private bool readyToSwitch;
         private volatile bool isProcessing;
         private volatile bool isAutoSwitching;
-        private bool manualEditInCurrentWord;
-        private string lastAutoSwitchedOriginalWord;
-        private DateTime lastAutoSwitchTime = DateTime.MinValue;
+        private volatile bool manualEditInCurrentWord;
+        private string lastAutoSwitchedOriginalWord;      // guarded by revertLock
+        private long lastAutoSwitchTimeUtcTicks;           // guarded by revertLock
+        private readonly object revertLock = new object();
         private System.Threading.Timer autoSwitchIdleTimer;
         private const int AutoSwitchIdleMs = 450;
         private SynchronizationContext uiContext;
@@ -338,14 +339,20 @@ namespace dotSwitcher.Switcher
 
         private void RememberRevertedAutoSwitchWord()
         {
-            string word = lastAutoSwitchedOriginalWord;
-            if (!string.IsNullOrEmpty(word) && (DateTime.UtcNow - lastAutoSwitchTime).TotalSeconds < 6.0)
+            string word;
+            lock (revertLock)
             {
-                lock (selectionLock)
+                word = lastAutoSwitchedOriginalWord;
+                if (string.IsNullOrEmpty(word) || (DateTime.UtcNow.Ticks - lastAutoSwitchTimeUtcTicks) >= 6L * TimeSpan.TicksPerSecond)
                 {
-                    ignoredWords.Add(word);
+                    return;
                 }
                 lastAutoSwitchedOriginalWord = null;
+            }
+
+            lock (selectionLock)
+            {
+                ignoredWords.Add(word);
             }
         }
 
@@ -417,8 +424,11 @@ namespace dotSwitcher.Switcher
             isProcessing = true;
             try
             {
-                lastAutoSwitchedOriginalWord = decision.OriginalWordKey;
-                lastAutoSwitchTime = DateTime.UtcNow;
+                lock (revertLock)
+                {
+                    lastAutoSwitchedOriginalWord = decision.OriginalWordKey;
+                    lastAutoSwitchTimeUtcTicks = DateTime.UtcNow.Ticks;
+                }
 
                 if (LowLevelAdapter.ReleasePressedFnKeys())
                 {
@@ -453,6 +463,18 @@ namespace dotSwitcher.Switcher
                     foreach (var k in extraKeys)
                     {
                         LowLevelAdapter.SendKeyPress(k.KeyCode, k.Shift);
+                    }
+                }
+
+                // Replace the tracked selection with the corrected (retyped) keys so that
+                // the next word's context and "Convert last word" use the fixed text, not
+                // the pre-switch characters.
+                lock (selectionLock)
+                {
+                    currentSelection = new List<KeyboardEventArgs>(decision.KeysToRetype);
+                    if (extraKeys != null)
+                    {
+                        currentSelection.AddRange(extraKeys);
                     }
                 }
 
@@ -514,6 +536,13 @@ namespace dotSwitcher.Switcher
             isProcessing = true;
             try
             {
+                // Refuse to clobber non-text clipboard content (files, images) that we
+                // cannot restore afterwards.
+                if (LowLevelAdapter.ClipboardHasNonTextPayload())
+                {
+                    return;
+                }
+
                 BeginNewSelection();
                 LowLevelAdapter.BackupClipboard();
 
@@ -544,6 +573,7 @@ namespace dotSwitcher.Switcher
 
                 if (LowLevelAdapter.GetClipboardSeqNumber() == seqBefore)
                 {
+                    LowLevelAdapter.RestoreClipboard();
                     return;
                 }
 

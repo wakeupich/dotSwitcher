@@ -1,4 +1,4 @@
-﻿/**
+/**
  *   DotSwitcher: a simple keyboard layout switcher
  *   Copyright (C) 2014-2019 Kirill Mokhovtsev / kurumpa
  *   Contact: kiev.programmer@gmail.com
@@ -49,11 +49,18 @@ namespace dotSwitcher.WinApi
     {
         public const string TaskName = "dotSwitcher";
 
-        public static void AllowShowSettingsFromNonElevated()
+        public static void AllowShowSettingsFromNonElevated(IntPtr hwnd)
         {
             try
             {
-                ChangeWindowMessageFilter(WM_SHOW_SETTINGS, MSGFLT_ADD);
+                if (hwnd != IntPtr.Zero)
+                {
+                    ChangeWindowMessageFilterEx(hwnd, WM_SHOW_SETTINGS, MSGFLT_ALLOW, IntPtr.Zero);
+                }
+                else
+                {
+                    ChangeWindowMessageFilter(WM_SHOW_SETTINGS, MSGFLT_ADD);
+                }
             }
             catch { }
         }
@@ -748,23 +755,6 @@ namespace dotSwitcher.WinApi
             return true;
         }
 
-        public static bool ReleasePressedKey(Keys keyCode, bool releaseTwice)
-        {
-            if (!KeyPressed(keyCode)) { return false; }
-            var keyUp = MakeKeyInput(keyCode, false);
-            if (releaseTwice)
-            {
-                var secondDown = MakeKeyInput(keyCode, true);
-                var secondUp = MakeKeyInput(keyCode, false);
-                SendInput(3, new INPUT[3] { keyUp, secondDown, secondUp }, Marshal.SizeOf(typeof(INPUT)));
-            }
-            else
-            {
-                SendInput(1, new INPUT[1] { keyUp }, Marshal.SizeOf(typeof(INPUT)));
-            }
-            return true;
-        }
-
         public static void SendShowSettingsMessage()
         {
             PostMessage((IntPtr)HWND_BROADCAST, WM_SHOW_SETTINGS, IntPtr.Zero, IntPtr.Zero);
@@ -1039,15 +1029,14 @@ namespace dotSwitcher.WinApi
             return GetClipboardSequenceNumber();
         }
 
-        public static Keys ToKey(char ch)
+        public static bool ClipboardHasNonTextPayload()
         {
-            var layout = GetCurrentLayout();
-            short keyNumber = VkKeyScanEx(ch, layout);
-            if (keyNumber == -1)
-            {
-                return Keys.None;
-            }
-            return (Keys)(((keyNumber & 0xFF00) << 8) | (keyNumber & 0xFF));
+            // Detect binary payloads (files, images) we cannot safely back up and restore.
+            return IsClipboardFormatAvailable(CF_HDROP) ||
+                   IsClipboardFormatAvailable(CF_BITMAP) ||
+                   IsClipboardFormatAvailable(CF_DIB) ||
+                   IsClipboardFormatAvailable(CF_DIBV5) ||
+                   IsClipboardFormatAvailable(CF_ENHMETAFILE);
         }
 
         public static bool TryGetClipboardText(out string text)

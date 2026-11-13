@@ -51,7 +51,7 @@ namespace dotSwitcher.UI
             engine.Error += OnEngineError;
 
             Loc.CurrentLang = settings.Language ?? "en";
-            LowLevelAdapter.AllowShowSettingsFromNonElevated();
+            LowLevelAdapter.AllowShowSettingsFromNonElevated(IntPtr.Zero);
 
             InitializeComponent();
             InitializeLanguageSelector();
@@ -328,6 +328,13 @@ namespace dotSwitcher.UI
             HideForm();
         }
 
+        protected override void OnHandleCreated(EventArgs e)
+        {
+            base.OnHandleCreated(e);
+            // Allow a non-elevated second instance to post WM_SHOW_SETTINGS to this window.
+            LowLevelAdapter.AllowShowSettingsFromNonElevated(this.Handle);
+        }
+
         // receive window message from another instance
         protected override void WndProc(ref Message m)
         {
@@ -593,10 +600,14 @@ namespace dotSwitcher.UI
 
         private void textBoxDelay_TextChanged(object sender, EventArgs e)
         {
-            short delay = 0;
-            if (!Int16.TryParse(Regex.Replace(textBoxDelay.Text, "[^0-9]", ""), out delay) || delay < 1)
+            int delay;
+            if (!int.TryParse(Regex.Replace(textBoxDelay.Text, "[^0-9]", ""), out delay) || delay < 1)
             {
                 delay = 1;
+            }
+            if (delay > 200)
+            {
+                delay = 200;
             }
             settings.SwitchDelay = delay;
             DisplaySwitchDelay(delay);
