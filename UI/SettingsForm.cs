@@ -40,25 +40,107 @@ namespace dotSwitcher.UI
         public event EventHandler<EventArgs> Exit;
         Settings settings;
         SwitcherCore engine;
+        System.Threading.Timer autoUpdateTimer;
+        volatile bool updateInProgress;
+        bool isUpdatingLanguageUi;
 
-        public SettingsForm(Settings settings, SwitcherCore engine)
+        public SettingsForm(Settings settings, SwitcherCore engine, bool justUpdated = false)
         {
             this.settings = settings;
             this.engine = engine;
             engine.Error += OnEngineError;
 
+            Loc.CurrentLang = settings.Language ?? "en";
             LowLevelAdapter.AllowShowSettingsFromNonElevated();
 
             InitializeComponent();
+            InitializeLanguageSelector();
             InitializeTrayIcon();
             InitializeHotkeyBoxes();
 
-            if (LowLevelAdapter.IsRunningAsAdmin())
+            ApplyLocalization();
+            UpdateUi();
+
+            if (justUpdated && settings.ShowTrayIcon == true)
             {
-                this.Text = "dotSwitcher Settings (Administrator)";
+                string ver = AutoUpdater.FormatVersion(AutoUpdater.GetCurrentVersion());
+                icon.ShowTooltip("dotSwitcher", Loc.Format("trayUpdated", ver), ToolTipIcon.Info);
             }
 
-            UpdateUi();
+            autoUpdateTimer = new System.Threading.Timer(
+                _ => RunBackgroundUpdateCheck(),
+                null,
+                TimeSpan.FromSeconds(6),
+                TimeSpan.FromHours(12));
+        }
+
+        private sealed class LanguageOption
+        {
+            public string Code { get; set; }
+            public string Title { get; set; }
+            public override string ToString() { return Title; }
+        }
+
+        void InitializeLanguageSelector()
+        {
+            isUpdatingLanguageUi = true;
+            try
+            {
+                comboBoxLanguage.Items.Clear();
+                comboBoxLanguage.Items.Add(new LanguageOption { Code = "en", Title = "English" });
+                comboBoxLanguage.Items.Add(new LanguageOption { Code = "ru", Title = "Русский" });
+            }
+            finally
+            {
+                isUpdatingLanguageUi = false;
+            }
+        }
+
+        void ApplyLocalization()
+        {
+            Loc.CurrentLang = settings.Language ?? "en";
+
+            string ver = AutoUpdater.FormatVersion(AutoUpdater.GetCurrentVersion());
+            this.Text = LowLevelAdapter.IsRunningAsAdmin()
+                ? Loc.Format("formTitleAdmin", ver)
+                : Loc.Format("formTitle", ver);
+
+            groupGeneral.Text = Loc.Get("groupGeneral");
+            groupBehavior.Text = Loc.Get("groupBehavior");
+            groupBox1.Text = Loc.Get("groupHotkeys");
+            groupBoxLayouts.Text = Loc.Get("groupLayouts");
+
+            checkBoxAutorun.Text = Loc.Get("autorun");
+            checkBoxRunAsAdmin.Text = Loc.Get("runAsAdmin");
+            checkBoxTrayIcon.Text = Loc.Get("trayIcon");
+            checkBoxAutoUpdate.Text = Loc.Get("autoUpdate");
+            labelLanguage.Text = Loc.Get("language");
+            if (!updateInProgress)
+            {
+                buttonCheckUpdate.Text = Loc.Get("checkUpdate");
+            }
+
+            checkBoxAutoSwitch.Text = Loc.Get("autoSwitch");
+            checkBoxSmartSelection.Text = Loc.Get("smartSelection");
+            label3.Text = Loc.Get("switchDelay");
+            labelDelayHint.Text = Loc.Get("delayHint");
+
+            label1.Text = Loc.Get("convertWord");
+            label2.Text = Loc.Get("convertSel");
+            label4.Text = Loc.Get("switchLayout");
+
+            radioAllLayouts.Text = Loc.Get("allLayouts");
+            radioSelectedLayouts.Text = Loc.Get("selectedLayouts");
+
+            buttonExit.Text = Loc.Get("exitProgram");
+            buttonGithub.Text = Loc.Get("reportIssue");
+            buttonSaveSettings.Text = Loc.Get("apply");
+            buttonCancelSettings.Text = Loc.Get("cancel");
+
+            if (icon != null)
+            {
+                icon.ApplyLocalization(engine.IsStarted(), settings.AutoSwitch == true);
+            }
         }
 
         /**
@@ -101,6 +183,28 @@ namespace dotSwitcher.UI
             checkBoxTrayIcon.Checked = settings.ShowTrayIcon == true;
             checkBoxSmartSelection.Checked = settings.SmartSelection == true;
             checkBoxAutoSwitch.Checked = settings.AutoSwitch == true;
+            checkBoxAutoUpdate.Checked = settings.AutoUpdate == true;
+
+            isUpdatingLanguageUi = true;
+            try
+            {
+                string langCode = string.Equals(settings.Language, "ru", StringComparison.OrdinalIgnoreCase) ? "ru" : "en";
+                for (int i = 0; i < comboBoxLanguage.Items.Count; i++)
+                {
+                    var opt = comboBoxLanguage.Items[i] as LanguageOption;
+                    if (opt != null && string.Equals(opt.Code, langCode, StringComparison.OrdinalIgnoreCase))
+                    {
+                        comboBoxLanguage.SelectedIndex = i;
+                        break;
+                    }
+                }
+            }
+            finally
+            {
+                isUpdatingLanguageUi = false;
+            }
+
+            ApplyLocalization();
             DisplaySwitchDelay(settings.SwitchDelay);
             PopulateLayoutsUi();
             icon.SetRunning(engine.IsStarted());
@@ -157,7 +261,7 @@ namespace dotSwitcher.UI
             ApplyCurrentHotkey();
             if (settings.SwitchHotkey != null && (settings.SwitchHotkey.Alt || settings.SwitchHotkey.Win))
             {
-                MessageBox.Show("Sorry, win+ and alt+ hotkeys are not supported yet for Convert last word");
+                MessageBox.Show(Loc.Get("msgWinAltUnsupported"), "dotSwitcher", MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 return;
             }
 
@@ -179,7 +283,7 @@ namespace dotSwitcher.UI
                 if (selectedIds.Count == 0)
                 {
                     MessageBox.Show(
-                        "Please select at least one keyboard layout or choose 'All installed layouts'.",
+                        Loc.Get("msgSelectAtLeastOneLayout"),
                         "dotSwitcher",
                         MessageBoxButtons.OK,
                         MessageBoxIcon.Warning);
@@ -432,7 +536,7 @@ namespace dotSwitcher.UI
             if (runAsAdmin && !LowLevelAdapter.IsRunningAsAdmin())
             {
                 var res = MessageBox.Show(
-                    "Restart dotSwitcher as Administrator now so hotkeys also work in elevated windows?",
+                    Loc.Get("msgRestartAdmin"),
                     "dotSwitcher",
                     MessageBoxButtons.YesNo,
                     MessageBoxIcon.Question);
@@ -503,11 +607,146 @@ namespace dotSwitcher.UI
          */
         void OnExit()
         {
+            if (autoUpdateTimer != null)
+            {
+                autoUpdateTimer.Dispose();
+                autoUpdateTimer = null;
+            }
             engine.Stop();
+            if (icon != null)
+            {
+                icon.Dispose();
+            }
             if (Exit != null)
             {
                 Exit(this, null);
             }
+        }
+
+        private void RunBackgroundUpdateCheck()
+        {
+            if (settings.AutoUpdate != true || updateInProgress || Visible)
+            {
+                return;
+            }
+            if (LowLevelAdapter.IsAutoSwitchBlockedWindow())
+            {
+                return;
+            }
+
+            updateInProgress = true;
+            try
+            {
+                var check = AutoUpdater.CheckForUpdate();
+                if (!check.Success || !check.HasUpdate)
+                {
+                    return;
+                }
+
+                string err;
+                if (AutoUpdater.TryDownloadAndApplyUpdate(check, out err))
+                {
+                    try
+                    {
+                        BeginInvoke((MethodInvoker)OnExit);
+                    }
+                    catch { }
+                }
+            }
+            finally
+            {
+                updateInProgress = false;
+            }
+        }
+
+        private void buttonCheckUpdate_Click(object sender, EventArgs e)
+        {
+            if (updateInProgress) return;
+            updateInProgress = true;
+            buttonCheckUpdate.Enabled = false;
+            buttonCheckUpdate.Text = Loc.Get("checking");
+
+            Task.Run(() =>
+            {
+                var check = AutoUpdater.CheckForUpdate();
+                try
+                {
+                    if (IsDisposed) return;
+                    BeginInvoke((MethodInvoker)delegate
+                    {
+                        buttonCheckUpdate.Enabled = true;
+                        buttonCheckUpdate.Text = Loc.Get("checkUpdate");
+
+                        if (!check.Success)
+                        {
+                            updateInProgress = false;
+                            MessageBox.Show(
+                                Loc.Format("msgUpdateCheckFailed", check.ErrorMessage),
+                                "dotSwitcher",
+                                MessageBoxButtons.OK,
+                                MessageBoxIcon.Warning);
+                            return;
+                        }
+
+                        if (!check.HasUpdate)
+                        {
+                            updateInProgress = false;
+                            MessageBox.Show(
+                                Loc.Format("msgLatestVersion", AutoUpdater.FormatVersion(check.CurrentVersion)),
+                                "dotSwitcher",
+                                MessageBoxButtons.OK,
+                                MessageBoxIcon.Information);
+                            return;
+                        }
+
+                        var answer = MessageBox.Show(
+                            Loc.Format(
+                                "msgUpdateAvailable",
+                                AutoUpdater.FormatVersion(check.LatestVersion),
+                                AutoUpdater.FormatVersion(check.CurrentVersion)),
+                            Loc.Get("msgUpdateTitle"),
+                            MessageBoxButtons.YesNo,
+                            MessageBoxIcon.Question);
+
+                        if (answer != DialogResult.Yes)
+                        {
+                            updateInProgress = false;
+                            return;
+                        }
+
+                        buttonCheckUpdate.Enabled = false;
+                        buttonCheckUpdate.Text = Loc.Get("updating");
+                        Task.Run(() =>
+                        {
+                            string err;
+                            bool started = AutoUpdater.TryDownloadAndApplyUpdate(check, out err);
+                            if (IsDisposed) return;
+                            BeginInvoke((MethodInvoker)delegate
+                            {
+                                if (started)
+                                {
+                                    OnExit();
+                                }
+                                else
+                                {
+                                    updateInProgress = false;
+                                    buttonCheckUpdate.Enabled = true;
+                                    buttonCheckUpdate.Text = Loc.Get("checkUpdate");
+                                    MessageBox.Show(
+                                        Loc.Format("msgUpdateFailed", err),
+                                        Loc.Get("msgUpdateTitle"),
+                                        MessageBoxButtons.OK,
+                                        MessageBoxIcon.Error);
+                                }
+                            });
+                        });
+                    });
+                }
+                catch
+                {
+                    updateInProgress = false;
+                }
+            });
         }
 
         private void buttonGithub_Click(object sender, EventArgs e)
@@ -517,7 +756,7 @@ namespace dotSwitcher.UI
 
         private void label5_MouseHover(object sender, EventArgs e)
         {
-            toolTip1.Show("Click the box and press any key (e.g. Right Ctrl, Left Shift, Caps Lock) or Backspace to clear", textBoxSwitchLayoutHotkey);
+            toolTip1.Show(Loc.Get("tipSwitchLayout"), textBoxSwitchLayoutHotkey);
         }
 
         private void label5_MouseLeave(object sender, EventArgs e)
@@ -527,9 +766,7 @@ namespace dotSwitcher.UI
 
         private void labelSmartSelectionHelp_MouseHover(object sender, EventArgs e)
         {
-            toolTip1.Show(
-                "When enabled, 'Convert last word' (Pause) converts the entire typed phrase (multiple words separated by spaces).\nWhen disabled, space resets tracking so only the single last word is converted.",
-                checkBoxSmartSelection);
+            toolTip1.Show(Loc.Get("tipSmartSelection"), checkBoxSmartSelection);
         }
 
         private void labelSmartSelectionHelp_MouseLeave(object sender, EventArgs e)
@@ -539,9 +776,7 @@ namespace dotSwitcher.UI
 
         private void labelAutoSwitchHelp_MouseHover(object sender, EventArgs e)
         {
-            toolTip1.Show(
-                "Automatically detects words typed in the wrong keyboard layout (using Windows Spell Checker + character N-gram model)\nand converts them on Space or a brief pause. Press Pause or Backspace right after to revert and ignore the word.",
-                checkBoxAutoSwitch);
+            toolTip1.Show(Loc.Get("tipAutoSwitch"), checkBoxAutoSwitch);
         }
 
         private void labelAutoSwitchHelp_MouseLeave(object sender, EventArgs e)
@@ -561,6 +796,22 @@ namespace dotSwitcher.UI
         private void checkBoxAutoSwitch_CheckedChanged(object sender, EventArgs e)
         {
             settings.AutoSwitch = checkBoxAutoSwitch.Checked;
+        }
+
+        private void checkBoxAutoUpdate_CheckedChanged(object sender, EventArgs e)
+        {
+            settings.AutoUpdate = checkBoxAutoUpdate.Checked;
+        }
+
+        private void comboBoxLanguage_SelectedIndexChanged(object sender, EventArgs e)
+        {
+            if (isUpdatingLanguageUi) return;
+            var opt = comboBoxLanguage.SelectedItem as LanguageOption;
+            if (opt != null)
+            {
+                settings.Language = opt.Code;
+                ApplyLocalization();
+            }
         }
 
         private void radioLayouts_CheckedChanged(object sender, EventArgs e)

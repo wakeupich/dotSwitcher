@@ -37,6 +37,9 @@ namespace dotSwitcher
         [STAThread]
         static void Main(string[] args)
         {
+            bool justUpdated = false;
+            bool waitRestart = false;
+
             if (args != null && args.Length > 0)
             {
                 if (args[0] == "--create-task")
@@ -50,9 +53,31 @@ namespace dotSwitcher
                     Environment.ExitCode = 0;
                     return;
                 }
+                if (args[0] == "--apply-update")
+                {
+                    Environment.ExitCode = AutoUpdater.RunApplyUpdateMode(args);
+                    return;
+                }
+
+                for (int i = 0; i < args.Length; i++)
+                {
+                    if (args[i] == "--restart-admin")
+                    {
+                        waitRestart = true;
+                    }
+                    else if (args[i] == "--updated")
+                    {
+                        justUpdated = true;
+                    }
+                    else if (args[i] == "--cleanup-update" && i + 1 < args.Length)
+                    {
+                        waitRestart = true;
+                        AutoUpdater.CleanupTempFile(args[i + 1]);
+                        i++;
+                    }
+                }
             }
 
-            bool waitRestart = args != null && args.Length > 0 && args[0] == "--restart-admin";
             bool acquired = false;
             try
             {
@@ -77,7 +102,7 @@ namespace dotSwitcher
 
                 var engine = new SwitcherCore(settings);
                 Application.ApplicationExit += (s, a) => { engine.Dispose(); };
-                var app = new SettingsForm(settings, engine);
+                var app = new SettingsForm(settings, engine, justUpdated);
                 app.Exit += (s, e) => Application.Exit();
                 var context = new ApplicationContext(app);
                 Application.Run(context);
