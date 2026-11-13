@@ -19,18 +19,63 @@
 
 using dotSwitcher.WinApi;
 using System;
-using System.Configuration;
+using System.Globalization;
+using System.IO;
+using System.Linq;
+using System.Reflection;
+using System.Runtime.Serialization;
+using System.Runtime.Serialization.Formatters.Binary;
 using System.Windows.Forms;
+using System.Xml.Linq;
 
 namespace dotSwitcher.Data
 {
     [Serializable]
-    public sealed class Settings : ApplicationSettingsBase, ISettings
+    public sealed class Settings : ISettings
     {
+        public static string SettingsDirectory
+        {
+            get
+            {
+                return Path.Combine(
+                    Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                    "dotSwitcher");
+            }
+        }
+
+        public static string SettingsFilePath
+        {
+            get { return Path.Combine(SettingsDirectory, "settings.xml"); }
+        }
+
+        public KeyboardEventArgs SwitchHotkey { get; set; }
+        public KeyboardEventArgs ConvertSelectionHotkey { get; set; }
+        public KeyboardEventArgs SwitchLayoutHotkey { get; set; }
+        public bool? SwitchLayoutInitialized { get; set; }
+        public bool? AutoStart { get; set; }
+        public bool? RunAsAdmin { get; set; }
+        public bool? ShowTrayIcon { get; set; }
+        public int SwitchDelay { get; set; }
+        public bool? SmartSelection { get; set; }
+        public bool? AutoSwitch { get; set; }
+        public bool? AutoUpdate { get; set; }
+        public bool? FilterLayouts { get; set; }
+        public string EnabledLayouts { get; set; }
+        public string Language { get; set; }
+
+        public Settings()
+        {
+            SwitchHotkey = KeyboardEventArgs.Empty;
+            ConvertSelectionHotkey = KeyboardEventArgs.Empty;
+            SwitchLayoutHotkey = KeyboardEventArgs.Empty;
+            EnabledLayouts = "";
+        }
+
         public static Settings Init()
         {
             var settings = new Settings();
             settings.Reload();
+
             if (settings.SwitchHotkey == null || settings.SwitchHotkey.KeyData == Keys.None)
             {
                 settings.SwitchHotkey = new KeyboardEventArgs(Keys.Pause, false);
@@ -57,6 +102,14 @@ namespace dotSwitcher.Data
             {
                 settings.AutoSwitch = true;
             }
+            if (settings.AutoUpdate == null)
+            {
+                settings.AutoUpdate = true;
+            }
+            if (settings.AutoStart == null)
+            {
+                settings.AutoStart = LowLevelAdapter.IsAutorunTaskExists() || LowLevelAdapter.IsAutorunShortcutExists();
+            }
             if (settings.RunAsAdmin == null)
             {
                 settings.RunAsAdmin = LowLevelAdapter.IsAutorunTaskExists() || LowLevelAdapter.IsRunningAsAdmin();
@@ -69,187 +122,292 @@ namespace dotSwitcher.Data
             {
                 settings.SwitchDelay = 20;
             }
+            if (settings.EnabledLayouts == null)
+            {
+                settings.EnabledLayouts = "";
+            }
+            if (string.IsNullOrWhiteSpace(settings.Language))
+            {
+                string uiTwoLetter = CultureInfo.CurrentUICulture.TwoLetterISOLanguageName;
+                settings.Language = string.Equals(uiTwoLetter, "ru", StringComparison.OrdinalIgnoreCase) ? "ru" : "en";
+            }
+
             settings.Save();
             return settings;
         }
 
-        [UserScopedSetting]
-        [SettingsSerializeAs(SettingsSerializeAs.Binary)]
-        [DefaultSettingValue("")]
-        public KeyboardEventArgs SwitchHotkey
+        public void Reload()
         {
-            get
+            ResetToNulls();
+
+            string path = SettingsFilePath;
+            if (File.Exists(path))
             {
-                return (KeyboardEventArgs)this["SwitchHotkey"] ?? KeyboardEventArgs.Empty;
+                try
+                {
+                    LoadFromXml(path);
+                    return;
+                }
+                catch
+                {
+                    // Fall back to legacy migration or defaults if settings.xml is corrupted
+                }
             }
-            set
-            {
-                this["SwitchHotkey"] = (KeyboardEventArgs)value; 
-            }
+
+            TryMigrateFromLegacyUserConfig();
         }
 
-        [UserScopedSetting]
-        [SettingsSerializeAs(SettingsSerializeAs.Binary)]
-        [DefaultSettingValue("")]
-        public KeyboardEventArgs ConvertSelectionHotkey
+        public void Save()
         {
-            get
+            try
             {
-                return (KeyboardEventArgs)this["ConvertSelectionHotkey"] ?? KeyboardEventArgs.Empty;
+                Directory.CreateDirectory(SettingsDirectory);
+
+                var root = new XElement("Settings",
+                    SerializeHotkey("SwitchHotkey", SwitchHotkey),
+                    SerializeHotkey("ConvertSelectionHotkey", ConvertSelectionHotkey),
+                    SerializeHotkey("SwitchLayoutHotkey", SwitchLayoutHotkey),
+                    SerializeNullableBool("SwitchLayoutInitialized", SwitchLayoutInitialized),
+                    SerializeNullableBool("AutoStart", AutoStart),
+                    SerializeNullableBool("RunAsAdmin", RunAsAdmin),
+                    SerializeNullableBool("ShowTrayIcon", ShowTrayIcon),
+                    new XElement("SwitchDelay", SwitchDelay),
+                    SerializeNullableBool("SmartSelection", SmartSelection),
+                    SerializeNullableBool("AutoSwitch", AutoSwitch),
+                    SerializeNullableBool("AutoUpdate", AutoUpdate),
+                    SerializeNullableBool("FilterLayouts", FilterLayouts),
+                    new XElement("EnabledLayouts", EnabledLayouts ?? ""),
+                    new XElement("Language", Language ?? "")
+                );
+
+                var doc = new XDocument(new XDeclaration("1.0", "utf-8", "yes"), root);
+                string targetPath = SettingsFilePath;
+                string tempPath = targetPath + ".tmp";
+                doc.Save(tempPath);
+
+                if (File.Exists(targetPath))
+                {
+                    File.Copy(tempPath, targetPath, true);
+                    File.Delete(tempPath);
+                }
+                else
+                {
+                    File.Move(tempPath, targetPath);
+                }
             }
-            set
-            {
-                this["ConvertSelectionHotkey"] = (KeyboardEventArgs)value;
-            }
+            catch { }
         }
 
-        [UserScopedSetting]
-        [SettingsSerializeAs(SettingsSerializeAs.Binary)]
-        [DefaultSettingValue("")]
-        public KeyboardEventArgs SwitchLayoutHotkey
+        private void ResetToNulls()
         {
-            get
-            {
-                return (KeyboardEventArgs)this["SwitchLayoutHotkey"] ?? KeyboardEventArgs.Empty;
-            }
-            set
-            {
-                this["SwitchLayoutHotkey"] = (KeyboardEventArgs)value;
-            }
+            SwitchHotkey = null;
+            ConvertSelectionHotkey = null;
+            SwitchLayoutHotkey = null;
+            SwitchLayoutInitialized = null;
+            AutoStart = null;
+            RunAsAdmin = null;
+            ShowTrayIcon = null;
+            SwitchDelay = 0;
+            SmartSelection = null;
+            AutoSwitch = null;
+            AutoUpdate = null;
+            FilterLayouts = null;
+            EnabledLayouts = "";
+            Language = "";
         }
 
-        [UserScopedSetting]
-        [SettingsSerializeAs(SettingsSerializeAs.Binary)]
-        [DefaultSettingValue("")]
-        public bool? SwitchLayoutInitialized
+        private static XElement SerializeHotkey(string name, KeyboardEventArgs hk)
         {
-            get
-            {
-                return (bool?)this["SwitchLayoutInitialized"];
-            }
-            set
-            {
-                this["SwitchLayoutInitialized"] = (bool?)value;
-            }
+            var effective = hk ?? KeyboardEventArgs.Empty;
+            return new XElement(name,
+                new XAttribute("KeyData", effective.KeyData.ToString()),
+                new XAttribute("Win", effective.Win ? "true" : "false"));
         }
 
-        [UserScopedSetting]
-        [SettingsSerializeAs(SettingsSerializeAs.Binary)]
-        [DefaultSettingValue("")]
-        public bool? AutoStart
+        private static KeyboardEventArgs DeserializeHotkey(XElement el)
         {
-            get
+            if (el == null) return null;
+            var keyAttr = el.Attribute("KeyData");
+            var winAttr = el.Attribute("Win");
+            if (keyAttr == null) return null;
+
+            Keys keyData;
+            if (!Enum.TryParse(keyAttr.Value, true, out keyData))
             {
-                return (bool?)this["AutoStart"];
+                int rawInt;
+                if (int.TryParse(keyAttr.Value, out rawInt))
+                {
+                    keyData = (Keys)rawInt;
+                }
+                else
+                {
+                    return null;
+                }
             }
-            set
+
+            bool win = false;
+            if (winAttr != null)
             {
-                this["AutoStart"] = (bool?)value;
+                bool.TryParse(winAttr.Value, out win);
             }
+            return new KeyboardEventArgs(keyData, win);
         }
 
-        [UserScopedSetting]
-        [SettingsSerializeAs(SettingsSerializeAs.Binary)]
-        [DefaultSettingValue("")]
-        public bool? RunAsAdmin
+        private static XElement SerializeNullableBool(string name, bool? val)
         {
-            get
-            {
-                return (bool?)this["RunAsAdmin"];
-            }
-            set
-            {
-                this["RunAsAdmin"] = (bool?)value;
-            }
+            return new XElement(name, val.HasValue ? (val.Value ? "true" : "false") : "");
         }
 
-        [UserScopedSetting]
-        [SettingsSerializeAs(SettingsSerializeAs.Binary)]
-        [DefaultSettingValue("")]
-        public bool? ShowTrayIcon
+        private static bool? DeserializeNullableBool(XElement el)
         {
-            get
-            {
-                return (bool?)this["ShowTrayIcon"];
-            }
-            set
-            {
-                this["ShowTrayIcon"] = (bool?)value;
-            }
+            if (el == null || string.IsNullOrWhiteSpace(el.Value)) return null;
+            bool parsed;
+            return bool.TryParse(el.Value.Trim(), out parsed) ? (bool?)parsed : null;
         }
 
-        [UserScopedSetting]
-        [SettingsSerializeAs(SettingsSerializeAs.Binary)]
-        [DefaultSettingValue("")]
-        public int SwitchDelay
+        private void LoadFromXml(string path)
         {
-            get
+            var doc = XDocument.Load(path);
+            var root = doc.Root;
+            if (root == null) return;
+
+            SwitchHotkey = DeserializeHotkey(root.Element("SwitchHotkey"));
+            ConvertSelectionHotkey = DeserializeHotkey(root.Element("ConvertSelectionHotkey"));
+            SwitchLayoutHotkey = DeserializeHotkey(root.Element("SwitchLayoutHotkey"));
+            SwitchLayoutInitialized = DeserializeNullableBool(root.Element("SwitchLayoutInitialized"));
+            AutoStart = DeserializeNullableBool(root.Element("AutoStart"));
+            RunAsAdmin = DeserializeNullableBool(root.Element("RunAsAdmin"));
+            ShowTrayIcon = DeserializeNullableBool(root.Element("ShowTrayIcon"));
+
+            var delayEl = root.Element("SwitchDelay");
+            int delayVal;
+            if (delayEl != null && int.TryParse(delayEl.Value, out delayVal))
             {
-                return (int)this["SwitchDelay"];
+                SwitchDelay = delayVal;
             }
-            set
-            {
-                this["SwitchDelay"] = (int)value;
-            }
+
+            SmartSelection = DeserializeNullableBool(root.Element("SmartSelection"));
+            AutoSwitch = DeserializeNullableBool(root.Element("AutoSwitch"));
+            AutoUpdate = DeserializeNullableBool(root.Element("AutoUpdate"));
+            FilterLayouts = DeserializeNullableBool(root.Element("FilterLayouts"));
+
+            var enabledEl = root.Element("EnabledLayouts");
+            EnabledLayouts = enabledEl != null ? (enabledEl.Value ?? "") : "";
+
+            var langEl = root.Element("Language");
+            Language = langEl != null ? (langEl.Value ?? "") : "";
         }
 
-        [UserScopedSetting]
-        [SettingsSerializeAs(SettingsSerializeAs.Binary)]
-        [DefaultSettingValue("")]
-        public bool? SmartSelection
+        private void TryMigrateFromLegacyUserConfig()
         {
-            get
+            try
             {
-                return (bool?)this["SmartSelection"];
+                if (!Directory.Exists(SettingsDirectory)) return;
+
+                var legacyFile = Directory
+                    .GetFiles(SettingsDirectory, "user.config", SearchOption.AllDirectories)
+                    .Select(p => new FileInfo(p))
+                    .OrderByDescending(f => f.LastWriteTimeUtc)
+                    .FirstOrDefault();
+
+                if (legacyFile == null || !legacyFile.Exists) return;
+
+                var doc = XDocument.Load(legacyFile.FullName);
+                var settingsNode = doc.Descendants("dotSwitcher.Data.Settings").FirstOrDefault();
+                if (settingsNode == null) return;
+
+                var formatter = new BinaryFormatter
+                {
+                    Binder = new LegacySettingsBinder()
+                };
+
+                foreach (var settingEl in settingsNode.Elements("setting"))
+                {
+                    var nameAttr = settingEl.Attribute("name");
+                    var serAttr = settingEl.Attribute("serializeAs");
+                    var valueEl = settingEl.Element("value");
+                    if (nameAttr == null || valueEl == null) continue;
+
+                    string name = nameAttr.Value;
+                    string rawVal = valueEl.Value;
+                    if (string.IsNullOrEmpty(rawVal)) continue;
+
+                    object decoded = null;
+                    if (serAttr != null && string.Equals(serAttr.Value, "Binary", StringComparison.OrdinalIgnoreCase))
+                    {
+                        try
+                        {
+                            byte[] bytes = Convert.FromBase64String(rawVal.Trim());
+                            using (var ms = new MemoryStream(bytes))
+                            {
+                                decoded = formatter.Deserialize(ms);
+                            }
+                        }
+                        catch
+                        {
+                            decoded = null;
+                        }
+                    }
+                    else
+                    {
+                        decoded = rawVal;
+                    }
+
+                    if (decoded == null) continue;
+
+                    switch (name)
+                    {
+                        case "SwitchHotkey":
+                            SwitchHotkey = decoded as KeyboardEventArgs;
+                            break;
+                        case "ConvertSelectionHotkey":
+                            ConvertSelectionHotkey = decoded as KeyboardEventArgs;
+                            break;
+                        case "SwitchLayoutHotkey":
+                            SwitchLayoutHotkey = decoded as KeyboardEventArgs;
+                            break;
+                        case "SwitchLayoutInitialized":
+                            if (decoded is bool) SwitchLayoutInitialized = (bool)decoded;
+                            break;
+                        case "AutoStart":
+                            if (decoded is bool) AutoStart = (bool)decoded;
+                            break;
+                        case "RunAsAdmin":
+                            if (decoded is bool) RunAsAdmin = (bool)decoded;
+                            break;
+                        case "ShowTrayIcon":
+                            if (decoded is bool) ShowTrayIcon = (bool)decoded;
+                            break;
+                        case "SwitchDelay":
+                            if (decoded is int) SwitchDelay = (int)decoded;
+                            break;
+                        case "SmartSelection":
+                            if (decoded is bool) SmartSelection = (bool)decoded;
+                            break;
+                        case "AutoSwitch":
+                            if (decoded is bool) AutoSwitch = (bool)decoded;
+                            break;
+                        case "FilterLayouts":
+                            if (decoded is bool) FilterLayouts = (bool)decoded;
+                            break;
+                        case "EnabledLayouts":
+                            EnabledLayouts = decoded.ToString();
+                            break;
+                    }
+                }
             }
-            set
-            {
-                this["SmartSelection"] = (bool?)value;
-            }
+            catch { }
         }
 
-        [UserScopedSetting]
-        [SettingsSerializeAs(SettingsSerializeAs.Binary)]
-        [DefaultSettingValue("")]
-        public bool? AutoSwitch
+        private sealed class LegacySettingsBinder : SerializationBinder
         {
-            get
+            public override Type BindToType(string assemblyName, string typeName)
             {
-                return (bool?)this["AutoSwitch"];
-            }
-            set
-            {
-                this["AutoSwitch"] = (bool?)value;
-            }
-        }
-
-        [UserScopedSetting]
-        [SettingsSerializeAs(SettingsSerializeAs.Binary)]
-        [DefaultSettingValue("")]
-        public bool? FilterLayouts
-        {
-            get
-            {
-                return (bool?)this["FilterLayouts"];
-            }
-            set
-            {
-                this["FilterLayouts"] = (bool?)value;
-            }
-        }
-
-        [UserScopedSetting]
-        [SettingsSerializeAs(SettingsSerializeAs.String)]
-        [DefaultSettingValue("")]
-        public string EnabledLayouts
-        {
-            get
-            {
-                return (string)this["EnabledLayouts"] ?? "";
-            }
-            set
-            {
-                this["EnabledLayouts"] = value ?? "";
+                if (string.Equals(typeName, "dotSwitcher.Data.KeyboardEventArgs", StringComparison.Ordinal))
+                {
+                    return typeof(KeyboardEventArgs);
+                }
+                return Type.GetType(string.Format("{0}, {1}", typeName, assemblyName), false);
             }
         }
     }

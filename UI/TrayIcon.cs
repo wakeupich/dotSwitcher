@@ -38,19 +38,23 @@ namespace dotSwitcher.UI
         private ContextMenu trayMenu;
         private MenuItem togglePowerItem;
         private MenuItem autoSwitchItem;
+        private MenuItem settingsItem;
+        private MenuItem exitItem;
         private bool wasShownBeforeTooltip;
 
         public TrayIcon (bool? visible = true)
 	    {
             trayMenu = new ContextMenu();
             togglePowerItem = new MenuItem("", OnPowerClick);
-            autoSwitchItem = new MenuItem("Auto-switch layout", OnAutoSwitchClick);
+            autoSwitchItem = new MenuItem(Loc.Get("trayAutoSwitch"), OnAutoSwitchClick);
+            settingsItem = new MenuItem(Loc.Get("traySettings"), OnSettingsClick);
+            exitItem = new MenuItem(Loc.Get("trayExit"), OnExitClick);
             trayMenu.MenuItems.Add(togglePowerItem);
             trayMenu.MenuItems.Add(autoSwitchItem);
             trayMenu.MenuItems.Add("-");
-            trayMenu.MenuItems.Add("Settings", OnSettingsClick);
+            trayMenu.MenuItems.Add(settingsItem);
             trayMenu.MenuItems.Add("-");
-            trayMenu.MenuItems.Add("Exit", OnExitClick);
+            trayMenu.MenuItems.Add(exitItem);
 
             trayIcon = new NotifyIcon();
             trayIcon.Text = "dotSwitcher";
@@ -65,11 +69,19 @@ namespace dotSwitcher.UI
 
         public void SetRunning(bool isRunning)
         {
-            togglePowerItem.Text = isRunning ? "Turn off" : "Turn on";
+            togglePowerItem.Text = isRunning ? Loc.Get("trayTurnOff") : Loc.Get("trayTurnOn");
         }
         public void SetAutoSwitch(bool enabled)
         {
             autoSwitchItem.Checked = enabled;
+        }
+        public void ApplyLocalization(bool isRunning, bool autoSwitchEnabled)
+        {
+            togglePowerItem.Text = isRunning ? Loc.Get("trayTurnOff") : Loc.Get("trayTurnOn");
+            autoSwitchItem.Text = Loc.Get("trayAutoSwitch");
+            autoSwitchItem.Checked = autoSwitchEnabled;
+            settingsItem.Text = Loc.Get("traySettings");
+            exitItem.Text = Loc.Get("trayExit");
         }
         public void Show()
         {
@@ -81,9 +93,24 @@ namespace dotSwitcher.UI
         }
         public void ShowTooltip(string p, ToolTipIcon icon)
         {
+            ShowTooltip(Loc.Get("trayError"), p, icon);
+        }
+
+        public void ShowTooltip(string title, string p, ToolTipIcon icon)
+        {
             wasShownBeforeTooltip = trayIcon.Visible;
             Show();
-            trayIcon.ShowBalloonTip(2000, "dotSwitcher error", p, icon);
+            trayIcon.ShowBalloonTip(3000, title, p, icon);
+        }
+
+        public void Dispose()
+        {
+            try
+            {
+                trayIcon.Visible = false;
+                trayIcon.Dispose();
+            }
+            catch { }
         }
 
 
