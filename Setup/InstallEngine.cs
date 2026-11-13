@@ -217,7 +217,7 @@ namespace dotSwitcher.Setup
                     return string.Format("{0}.{1}.{2}", v.Major, v.Minor, Math.Max(0, v.Build));
                 }
             }
-            return "1.3.0";
+            return "1.3.1";
         }
 
         public static void LoadExistingSettingsFlags(out bool autoStart, out bool runAsAdmin)
