@@ -116,6 +116,8 @@ namespace dotSwitcher.WinApi
         [DllImport("kernel32.dll", SetLastError = true)]
         [return: MarshalAs(UnmanagedType.Bool)]
         private static extern bool GlobalUnlock(IntPtr hMem);
+        [DllImport("kernel32.dll", SetLastError = true)]
+        private static extern UIntPtr GlobalSize(IntPtr hMem);
         [DllImport("msctf.dll")]
         private static extern int TF_CreateInputProcessorProfiles(out ITfInputProcessorProfiles ppipr);
         [DllImport("user32.dll", CharSet = CharSet.Auto, SetLastError = true)]
@@ -124,11 +126,14 @@ namespace dotSwitcher.WinApi
 
         public static uint WM_SHOW_SETTINGS = RegisterWindowMessage("WM_SHOW_SETTINGS");
         public static readonly IntPtr InjectedExtraInfo = new IntPtr(0x444F5453); // "DOTS"
-        public const uint CF_UNICODETEXT = 13;
+        public const uint CF_TEXT = 1;
         public const uint CF_BITMAP = 2;
+        public const uint CF_OEMTEXT = 7;
         public const uint CF_DIB = 8;
+        public const uint CF_UNICODETEXT = 13;
         public const uint CF_ENHMETAFILE = 14;
         public const uint CF_HDROP = 15;
+        public const uint CF_LOCALE = 16;
         public const uint CF_DIBV5 = 17;
         public const uint GMEM_MOVEABLE = 0x0002;
         public const uint MSGFLT_ADD = 1;

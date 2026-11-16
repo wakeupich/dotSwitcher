@@ -725,13 +725,10 @@ namespace dotSwitcher.WinApi
         {
             Keys.RControlKey,
             Keys.LControlKey,
-            Keys.ControlKey,
             Keys.LShiftKey,
             Keys.RShiftKey,
-            Keys.ShiftKey,
             Keys.LMenu,
             Keys.RMenu,
-            Keys.Menu,
             Keys.LWin,
             Keys.RWin
         };
@@ -1018,25 +1015,27 @@ namespace dotSwitcher.WinApi
 
         #region Fast Native Win32 Clipboard & Backup / Restore
 
-        private static string backupText = null;
-        private static bool hadText = false;
+        private sealed class ClipboardBackupEntry
+        {
+            public uint Format;
+            public byte[] Data;
+        }
+
+        private const long MaxClipboardBackupBytes = 32L * 1024 * 1024;
+        private static List<ClipboardBackupEntry> backupEntries = null;
         private static readonly uint FormatExcludeMonitor = RegisterClipboardFormat("ExcludeClipboardContentFromMonitorProcessing");
         private static readonly uint FormatCanIncludeHistory = RegisterClipboardFormat("CanIncludeInClipboardHistory");
         private static readonly uint FormatCanUploadCloud = RegisterClipboardFormat("CanUploadToCloudClipboard");
+        private static readonly uint FormatHtml = RegisterClipboardFormat("HTML Format");
+        private static readonly uint FormatRtf = RegisterClipboardFormat("Rich Text Format");
+        private static readonly uint FormatPng = RegisterClipboardFormat("PNG");
+        private static readonly uint FormatPreferredDropEffect = RegisterClipboardFormat("Preferred DropEffect");
+        private static readonly uint FormatShellIdList = RegisterClipboardFormat("Shell IDList Array");
+        private static readonly uint FormatFileNameW = RegisterClipboardFormat("FileNameW");
 
         public static uint GetClipboardSeqNumber()
         {
             return GetClipboardSequenceNumber();
-        }
-
-        public static bool ClipboardHasNonTextPayload()
-        {
-            // Detect binary payloads (files, images) we cannot safely back up and restore.
-            return IsClipboardFormatAvailable(CF_HDROP) ||
-                   IsClipboardFormatAvailable(CF_BITMAP) ||
-                   IsClipboardFormatAvailable(CF_DIB) ||
-                   IsClipboardFormatAvailable(CF_DIBV5) ||
-                   IsClipboardFormatAvailable(CF_ENHMETAFILE);
         }
 
         public static bool TryGetClipboardText(out string text)
@@ -1166,16 +1165,182 @@ namespace dotSwitcher.WinApi
             return false;
         }
 
-        public static void BackupClipboard()
+        private static byte[] ReadClipboardHGlobalBytes(uint format, long remainingBudget)
         {
-            hadText = TryGetClipboardText(out backupText);
+            if (format == 0 || remainingBudget <= 0 || !IsClipboardFormatAvailable(format))
+            {
+                return null;
+            }
+            IntPtr handle = GetClipboardData(format);
+            if (handle == IntPtr.Zero)
+            {
+                return null;
+            }
+            ulong rawSize = (ulong)GlobalSize(handle);
+            if (rawSize == 0 || rawSize > (ulong)remainingBudget || rawSize > int.MaxValue)
+            {
+                return null;
+            }
+            IntPtr ptr = GlobalLock(handle);
+            if (ptr == IntPtr.Zero)
+            {
+                return null;
+            }
+            try
+            {
+                var data = new byte[(int)rawSize];
+                Marshal.Copy(ptr, data, 0, data.Length);
+                return data;
+            }
+            finally
+            {
+                GlobalUnlock(handle);
+            }
         }
 
+        private static bool WriteClipboardHGlobalBytes(uint format, byte[] data)
+        {
+            if (format == 0 || data == null || data.Length == 0)
+            {
+                return false;
+            }
+            IntPtr hGlobal = GlobalAlloc(GMEM_MOVEABLE, (UIntPtr)data.Length);
+            if (hGlobal == IntPtr.Zero)
+            {
+                return false;
+            }
+            IntPtr ptr = GlobalLock(hGlobal);
+            if (ptr == IntPtr.Zero)
+            {
+                GlobalFree(hGlobal);
+                return false;
+            }
+            try
+            {
+                Marshal.Copy(data, 0, ptr, data.Length);
+            }
+            finally
+            {
+                GlobalUnlock(hGlobal);
+            }
+            if (SetClipboardData(format, hGlobal) == IntPtr.Zero)
+            {
+                GlobalFree(hGlobal);
+                return false;
+            }
+            return true;
+        }
+
+        /// <summary>
+        /// Saves supported HGLOBAL clipboard formats (text, rich text, HTML, images, file drops)
+        /// within MaxClipboardBackupBytes so ConvertSelection can restore the previous clipboard.
+        /// </summary>
+        public static void BackupClipboard()
+        {
+            backupEntries = null;
+
+            uint[] formats = new uint[]
+            {
+                CF_UNICODETEXT,
+                CF_TEXT,
+                CF_OEMTEXT,
+                CF_LOCALE,
+                FormatHtml,
+                FormatRtf,
+                FormatPng,
+                CF_DIBV5,
+                CF_DIB,
+                CF_HDROP,
+                FormatPreferredDropEffect,
+                FormatShellIdList,
+                FormatFileNameW
+            };
+
+            for (int attempt = 0; attempt < 15; attempt++)
+            {
+                if (OpenClipboard(IntPtr.Zero))
+                {
+                    try
+                    {
+                        var entries = new List<ClipboardBackupEntry>();
+                        long totalBytes = 0;
+                        bool hasDibV5 = false;
+
+                        for (int i = 0; i < formats.Length; i++)
+                        {
+                            uint fmt = formats[i];
+                            if (fmt == 0) continue;
+                            // Windows synthesizes CF_DIB and CF_BITMAP from CF_DIBV5 automatically.
+                            if (fmt == CF_DIB && hasDibV5) continue;
+
+                            byte[] data = ReadClipboardHGlobalBytes(fmt, MaxClipboardBackupBytes - totalBytes);
+                            if (data != null && data.Length > 0)
+                            {
+                                entries.Add(new ClipboardBackupEntry { Format = fmt, Data = data });
+                                totalBytes += data.Length;
+                                if (fmt == CF_DIBV5)
+                                {
+                                    hasDibV5 = true;
+                                }
+                            }
+                        }
+
+                        if (entries.Count > 0)
+                        {
+                            backupEntries = entries;
+                        }
+                        return;
+                    }
+                    finally
+                    {
+                        CloseClipboard();
+                    }
+                }
+                Thread.Sleep(2);
+            }
+        }
+
+        /// <summary>
+        /// Restores previously backed-up clipboard formats without polluting Windows clipboard history.
+        /// </summary>
         public static void RestoreClipboard()
         {
-            if (hadText && backupText != null)
+            var entries = backupEntries;
+            backupEntries = null;
+            if (entries == null || entries.Count == 0)
             {
-                TrySetClipboardText(backupText, true);
+                return;
+            }
+
+            for (int attempt = 0; attempt < 15; attempt++)
+            {
+                if (OpenClipboard(IntPtr.Zero))
+                {
+                    try
+                    {
+                        EmptyClipboard();
+                        bool wroteAny = false;
+                        for (int i = 0; i < entries.Count; i++)
+                        {
+                            if (WriteClipboardHGlobalBytes(entries[i].Format, entries[i].Data))
+                            {
+                                wroteAny = true;
+                            }
+                        }
+                        if (wroteAny)
+                        {
+                            SetClipboardDword(FormatExcludeMonitor, 1);
+                            SetClipboardDword(FormatCanIncludeHistory, 0);
+                            SetClipboardDword(FormatCanUploadCloud, 0);
+                        }
+                        return;
+                    }
+                    finally
+                    {
+                        CloseClipboard();
+                    }
+                }
+                Thread.Sleep(2);
             }
         }
 

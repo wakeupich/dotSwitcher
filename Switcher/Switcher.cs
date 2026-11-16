@@ -536,19 +536,12 @@ namespace dotSwitcher.Switcher
             isProcessing = true;
             try
             {
-                // Refuse to clobber non-text clipboard content (files, images) that we
-                // cannot restore afterwards.
-                if (LowLevelAdapter.ClipboardHasNonTextPayload())
-                {
-                    return;
-                }
-
                 BeginNewSelection();
                 LowLevelAdapter.BackupClipboard();
 
                 if (LowLevelAdapter.ReleasePressedFnKeys())
                 {
-                    Thread.Sleep(4);
+                    Thread.Sleep(15);
                 }
 
                 uint seqBefore = LowLevelAdapter.GetClipboardSeqNumber();
@@ -556,17 +549,20 @@ namespace dotSwitcher.Switcher
 
                 var sw = Stopwatch.StartNew();
                 bool retriedCopy = false;
-                while (sw.ElapsedMilliseconds < 110)
+                while (sw.ElapsedMilliseconds < 350)
                 {
                     Thread.Sleep(2);
                     if (LowLevelAdapter.GetClipboardSeqNumber() != seqBefore)
                     {
                         break;
                     }
-                    if (!retriedCopy && sw.ElapsedMilliseconds >= 45)
+                    if (!retriedCopy && sw.ElapsedMilliseconds >= 120)
                     {
                         retriedCopy = true;
-                        LowLevelAdapter.ReleasePressedFnKeys();
+                        if (LowLevelAdapter.ReleasePressedFnKeys())
+                        {
+                            Thread.Sleep(10);
+                        }
                         LowLevelAdapter.SendCopy();
                     }
                 }
@@ -598,11 +594,14 @@ namespace dotSwitcher.Switcher
                     return;
                 }
 
-                LowLevelAdapter.ReleasePressedFnKeys();
+                if (LowLevelAdapter.ReleasePressedFnKeys())
+                {
+                    Thread.Sleep(10);
+                }
                 LowLevelAdapter.SendPaste();
                 LowLevelAdapter.SetKeyboardLayout(targetHkl);
 
-                Thread.Sleep(Math.Max(25, settings.SwitchDelay));
+                Thread.Sleep(Math.Max(90, settings.SwitchDelay * 3));
                 LowLevelAdapter.RestoreClipboard();
             }
             finally
