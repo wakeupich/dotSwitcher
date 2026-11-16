@@ -1,80 +1,62 @@
-dotSwitcher
-===========
-*If you're paranoid enough not to use [Punto switcher](http://punto.yandex.ru "closed source software")*
+🌐 Язык / Language: **Русский** | [English](README.en.md)
 
-A lightweight keyboard layout switcher for Windows with automatic layout detection based on the
-Windows spell checker and a built-in phonotactic model. No telemetry; the only network access is the
-optional update check against GitHub releases.
+# dotSwitcher
 
-This is a community fork of the original [dotSwitcher](https://github.com/kurumpa/dotSwitcher)
-(GPL v3) that adds automatic switching, a smarter selection converter and a two-language UI.
+*Если вы достаточно параноик, чтобы не пользоваться [Punto Switcher](http://punto.yandex.ru "программа с закрытым исходным кодом")*
 
-Features
---------
-* **Convert the last word** to the other layout with a single hotkey.
-* **Automatic switching** (optional): detects words typed in the wrong layout and fixes them on
-  `Space` or a short pause.
-* **Convert selected text** between layouts, clipboard-safe (non-text clipboard content is never
-  clobbered).
-* **Two-language UI** (English / Russian).
-* **Run as administrator** via Task Scheduler, so hotkeys also work in elevated apps and games.
-* **Layout cycle filter**: choose which keyboard layouts participate in switching.
-* Built-in **updater** (GitHub releases) and a standalone **installer**.
-* Configurable **switch delay** (1–200 ms) and smart selection behaviour.
+Лёгкий переключатель раскладки клавиатуры для Windows с автоматическим определением неверной раскладки на базе встроенной проверки орфографии Windows и фонотактической N-gram модели. Никакой телеметрии — единственное сетевое обращение это необязательная проверка обновлений через релизы GitHub.
 
-Default hotkeys
----------------
-* `Pause` — convert the last typed word.
-* `Pause + Shift` — convert the selected text.
-* `Right Ctrl` — switch to the next keyboard layout.
+Проект является развиваемым форком оригинального [dotSwitcher](https://github.com/kurumpa/dotSwitcher) (GPL v3), в который добавлены автопереключение на лету, надёжная конвертация выделенного текста, установщик, автообновление и двуязычный интерфейс.
 
-All hotkeys are configurable in the settings window.
+## Возможности
+* **Исправление последнего слова** в другую раскладку одним нажатием горячей клавиши.
+* **Автоматическое переключение** (опционально, вкл/выкл в настройках и в меню трея): распознаёт слова, набранные не в той раскладке, и исправляет их по нажатию `Пробел` или короткой паузе.
+* **Перевод выделенного текста** между раскладками с сохранением буфера обмена (включая текст, HTML, RTF, картинки/скриншоты и файлы до 32 МБ; без замусоривания истории `Win+V`).
+* **Двуязычный интерфейс**: русский и английский (переключается в настройках).
+* **Запуск от имени администратора** через Планировщик задач Windows — горячие клавиши работают даже в окнах с повышенными правами и играх.
+* **Фильтр цикла раскладок**: можно выбрать, какие из установленных раскладок участвуют в переключении.
+* **Установщик и автообновление**: `dotSwitcher-Setup.exe` автоматически находит уже установленную копию (в реестре, Планировщике задач, автозагрузке или среди запущенных процессов) и обновляет её поверх существующего пути.
+* **Настраиваемые параметры**: единый файл настроек `%LOCALAPPDATA%\dotSwitcher\settings.xml` (не привязан к версии или пути к `.exe`), задержка переключения (`1–200 мс`) и «умное» преобразование выделения.
 
-Personal dictionary
--------------------
-If you use personal names, hostnames or uncommon words that should always be treated as valid by the
-layout auto-detection, put them into a plain-text file:
+## Горячие клавиши по умолчанию
+* `Pause` — исправить последнее набранное слово (повторное нажатие или `Backspace` сразу после автопереключения откатывает замену и добавляет слово в исключения текущей сессии).
+* `Shift + Pause` — перевести выделенный текст в другую раскладку.
+* `Right Ctrl` — переключить раскладку клавиатуры.
+
+Все горячие клавиши можно переназначить в окне настроек.
+
+## Личный словарь
+Если вы часто используете имена собственные, хостнеймы или специфические слова, которые автопереключатель не должен трогать, добавьте их в обычный текстовый файл:
 
     %LOCALAPPDATA%\dotSwitcher\dictionary.txt
 
-* One word per line, UTF-8 encoding.
-* Lines starting with `#` are comments.
-* **The file is not created automatically** — create it yourself.
-* It is a separate mechanism from the "smart exceptions": pressing `Backspace` or `Pause` right after
-  an auto-switch reverts and ignores that word **for the current session only** (exceptions are kept
-  in memory and are not written to disk).
+* Одно слово на строку, кодировка UTF-8.
+* Строки, начинающиеся с `#`, считаются комментариями.
+* **Файл не создаётся автоматически** — создайте его при необходимости вручную.
+* Это отдельный механизм от «исключений сессии»: мгновенный откат клавишей `Pause` или `Backspace` запоминает слово только в оперативной памяти до перезапуска программы.
 
-Usage
------
-* Run dotSwitcher.
-* Type a word anywhere.
-* Press `Pause` until the word is typed in the right layout.
-* Profit!
+## Использование
+* Запустите `dotSwitcher` (или установите через `dotSwitcher-Setup.exe`).
+* Печатайте текст как обычно — при ошибке раскладки автопереключатель поправит слово сам, либо нажмите `Pause`.
+* Для перевода уже выделенного фрагмента нажмите `Shift + Pause`.
 
-Launching the program a second time shows the settings window, even in hidden mode (no tray icon).
+Повторный запуск программы открывает окно настроек, даже если значок в трее скрыт.
 
-Building
---------
-Requires .NET Framework 4.6.1 and MSBuild (VS 2022 Build Tools or newer). Run:
+## Сборка из исходников
+Требуется .NET Framework 4.6.1 и MSBuild (VS 2022 Build Tools или новее). Запустите:
 
     build_someday.cmd
 
-It builds `dotSwitcher.sln` in Release and produces:
+Скрипт соберёт решение `dotSwitcher.sln` в конфигурации `Release` и создаст:
+* `bin\Release\dotSwitcher.exe` — переносимый исполняемый файл;
+* `Setup\bin\Release\dotSwitcher-Setup.exe` — установщик и деинсталлятор.
 
-* `bin\Release\dotSwitcher.exe` — portable executable
-* `Setup\bin\Release\dotSwitcher-Setup.exe` — installer
+## Благодарности
+* Оригинальный dotSwitcher — [kurumpa](https://github.com/kurumpa).
+* Иконка GitHub — [Picons.me](https://picons.me/).
 
-Credits
--------
-* Original dotSwitcher by [kurumpa](https://github.com/kurumpa).
-* GitHub icon by [Picons.me](https://picons.me/).
+## Лицензия
+GNU General Public License v3.0 — см. [LICENSE.txt](LICENSE.txt).
 
-License
--------
-GNU General Public License v3.0 — see [LICENSE.txt](LICENSE.txt).
-
-Known bugs
-----------
-If you experience erasing the word and retyping it again in the same layout (e.g. in Skype), try to
-increase the switch delay in the settings window (200 ms works well).
-See also [this StackOverflow question](http://stackoverflow.com/questions/27720728/cant-send-wm-inputlangchangerequest-to-some-controls).
+## Известные особенности
+Если в некоторых программах (например, старых версиях мессенджеров) слово стирается и печатается повторно в той же раскладке, попробуйте увеличить задержку переключения в настройках (обычно помогает `50–200 мс`). Подробнее об этом нюансе Windows можно прочитать в [обсуждении на StackOverflow](http://stackoverflow.com/questions/27720728/cant-send-wm-inputlangchangerequest-to-some-controls).
